@@ -20,8 +20,9 @@ from cloverboard.logger.context import RunContext, get_context, set_context
 from cloverboard.logger.environment import collect_environment
 from cloverboard.logger.run_dir import create_run_dir
 from cloverboard.logger.paths import relative_metadata
+from cloverboard.storage.paths import resolve_log_path
 from cloverboard.storage.protocols import RunMeta, ScalarRecord
-from cloverboard.storage.sqlite_backend import SqliteStorageWriter
+from cloverboard.storage.sqlite_backend import SqliteStorageWriter, read_run_meta
 from cloverboard.metrics import metric_field
 from cloverboard.tags import normalize_tags
 
@@ -35,15 +36,21 @@ def init(
     capture_hardware: bool = True,
     tags: list[str] | None = None,
     workspace_root: str | Path | None = None,
+    *,
+    run_dir: str | None = None,
 ) -> None:
-    """Start a new run (one global singleton per process).
+    """Start or continue a run (one global singleton per process).
 
-    Creates the run directory, writes the config and environment snapshot,
-    then starts the background batch writer.
+    Opens the directory, initializes new Run metadata or merges explicit
+    updates into an existing Run, then starts the background batch writer.
 
     Params:
         exp_name: display name in the UI; generated when omitted.
         logdir: root directory holding all run folders and .workspace state.
+        run_dir: immediate subdirectory name. Create it when absent or append
+            to its existing Run database; omitted means allocate a new Run.
+            Resuming preserves name, start time and environment. Explicit
+            config keys merge and supplied tags are added incrementally.
         config: any common config object (Namespace / dict / dataclass / YAML
             path); equivalent to calling log_config() right after init.
         capture_git / capture_stdout: compatibility arguments; no capture is
@@ -52,8 +59,8 @@ def init(
         workspace_root: optional base for absolute paths recorded in config,
             argv and snapshot metadata. Paths outside it remain unchanged.
 
-    Exceptions: never raised to the caller; unwritable directories or a
-    missing GPU degrade silently.
+    Exceptions: never raised to the caller; failed initialization warns and
+    disables logging. Training checkpoint and Step restoration are caller-owned.
     """
     _shutdown()
     try:
@@ -64,10 +71,15 @@ def init(
             capture_hardware=capture_hardware,
             tags=normalize_tags(tags or []),
             workspace_root=workspace_root,
+            run_dir=run_dir,
         )
-    except Exception:
+    except Exception as error:
         # Logging must never break the training loop.
         set_context(RunContext(run_id="", logdir=Path(logdir), exp_name=exp_name))
+        try:
+            warnings.warn(f"CloverBoard could not initialize logging: {error}", RuntimeWarning, stacklevel=2)
+        except Warning:
+            pass
 
 
 def _start_run(
@@ -77,29 +89,43 @@ def _start_run(
     capture_hardware: bool,
     tags: list[str],
     workspace_root: str | Path | None,
+    run_dir: str | None,
 ) -> None:
-    logdir_path = Path(logdir)
+    logdir_path = Path(logdir).expanduser()
     started_at = time.time()
-    run_id, run_path = create_run_dir(
+    run_id, _ = create_run_dir(
         logdir_path,
         datetime.fromtimestamp(started_at),
+        run_dir=run_dir,
     )
     metadata_root = Path(os.path.abspath(Path(workspace_root).expanduser())) if workspace_root is not None else None
     config_dict = relative_metadata(normalize_config(config), metadata_root)
-    environment = collect_environment(capture_hardware=capture_hardware, workspace_root=metadata_root)
+    storage_root = logdir_path.resolve()
+    db_path = resolve_log_path(storage_root, run_id, "run.sqlite")
+    for suffix in ("-wal", "-shm", "-journal"):
+        resolve_log_path(storage_root, run_id, "run.sqlite" + suffix)
+    previous = read_run_meta(db_path, run_id) if db_path.exists() else None
+    environment = previous.env if previous else collect_environment(capture_hardware=capture_hardware, workspace_root=metadata_root)
 
-    writer = SqliteStorageWriter(run_path / "run.sqlite")
+    writer = SqliteStorageWriter(db_path)
     try:
-        writer.init_run(
-            RunMeta(
-                run_id=run_id,
-                name=exp_name,
-                started_at=started_at,
-                config=config_dict,
-                env=environment,
-                tags=tags,
+        if previous:
+            writer.update_config(config_dict)
+            if tags:
+                writer.update_tags(tags, [])
+            config_dict = {**previous.config, **config_dict}
+            exp_name = previous.name
+        else:
+            writer.init_run(
+                RunMeta(
+                    run_id=run_id,
+                    name=exp_name,
+                    started_at=started_at,
+                    config=config_dict,
+                    env=environment,
+                    tags=tags,
+                )
             )
-        )
     except Exception:
         writer.flush_and_close()
         raise

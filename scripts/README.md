@@ -2,31 +2,63 @@
 
 ## Import local TensorBoard logs
 
-`import_tensorboard.py` converts a static TensorBoard directory tree into a new,
-separate CloverBoard dataset. It needs the optional `tensorboard` package in the
-script's Python environment; the application itself does not depend on it.
+The packaged `import-tensorboard` command imports scalar history and optionally
+keeps following a live TensorBoard directory. Install its optional dependency
+in the same environment; ordinary SDK, Web and MCP usage does not import it.
 
 ```sh
-python scripts/import_tensorboard.py "C:/path/to/tb_logger" --output .local-data/tensorboard
-python -m cloverboard.cli serve --logdir .local-data/tensorboard/runs --port 6040
+python -m pip install -e ".[tensorboard]"
+cloverboard import-tensorboard ./tb_logs --output .local-data/tensorboard --follow --interval 5
+cloverboard serve --logdir .local-data/tensorboard --port 6040
 ```
 
-Each directory containing event files becomes one Run, named after its relative
-path. Files in that directory merge in filename order. Legacy scalars and numeric
-scalar tensors retain Step and wall time without import-time sampling or purging
-restarted steps. Repeated tag/Step values overwrite in fixed filename and event
-order, independent of directory enumeration order. Reports distinguish source
-observations, stored unique points and overwrites. Empty logs remain as tagged
-empty Runs. Training lifecycle status is not inferred or stored.
+The importer and server run in separate terminals. Ctrl+C stops following and
+releases the output lock. Omit `--follow` for a single pass; it rejects an
+incomplete/corrupt tail instead of waiting. `python -m cloverboard.cli` also works
+when the console command is unavailable.
 
-Multi-level tags retain their paths: `metrics/Set5/psnr` belongs to the `metrics`
-display group with chart title `Set5/psnr`. Normalization collisions receive a stable suffix;
-`import-report.json` records mappings, counts, unsupported summary types, source
-file hashes and empty Runs. Original tags and source paths also appear in Run
-details → environment metadata. This scalar importer does not convert media,
-histograms or text. It rejects damaged/truncated or changing files, existing output
-directories and overlapping source/output paths. Reruns should use a new output
-directory. Output is published only after the entire conversion succeeds.
+Each immediate subdirectory with event files becomes `output/<name>/run.sqlite`.
+Files in the source root become `output/<source-name>/run.sqlite`. Nested event
+directories and case-insensitive Run name collisions are rejected; choose a
+narrower source root instead. Directory links/junctions are skipped. Source and
+output must not overlap. Existing output can be reused for the same source;
+native Runs with a matching name are rejected rather than overwritten.
+
+Legacy scalars and numeric scalar tensors retain Step and wall time, including
+NaN/Inf gaps. There is no import-time sampling or restart-step purging. Files
+merge in filename order, then event order; the last duplicate metric/Step wins.
+Appending an older file cannot override a duplicate in a later file. Multi-level
+metric paths retain their groups and names. Noncanonical tags and the reserved
+`tensorboard/tag_` prefix map to `tensorboard/tag_<sha256 of original tag>`,
+independent of discovery order. Environment metadata records the initial tag map
+and relative source directory; later polls do not rewrite that snapshot. Empty
+logs remain visible Runs. Media, histograms, text and lifecycle state are not
+imported; skipped summary types are counted in console output.
+
+The initial pass reads history. Further polls scan filenames and fresh file
+metadata, then decode only appended records. Unchanged files do not reopen or
+parse, and no full-file hash is computed. Replacements, size decreases or
+same-size modifications replay only the affected Run. Source-only points remain
+in the target when source files are removed. The source is authoritative for
+metric/Step keys it still contains. Stat-based monitoring assumes appended
+event files; arbitrary same-inode rewrites that also grow a file are outside
+this contract. Follow mode reports incomplete/corrupt tails and retries when
+the file changes; a permanently corrupt tail needs attention at the source.
+
+Event cursors and duplicate precedence are held in memory. Restarting reads
+history again and upserts, preserving Run name, start time, config, environment,
+Tags, Notes and workspace Views/settings. New Runs are published after their
+first successful pass; existing Runs commit batches, so a failed pass may have
+written a valid prefix. Retrying is safe. The output's
+`.workspace/tensorboard-import.sqlite` holds the source binding and a process
+lock, independently of `workspace.sqlite`; it stores no byte checkpoints. A
+crash releases the lock automatically. Run one importer per output.
+
+For native SDK takeover, stop the importer and use
+`cb.init(logdir=".local-data/tensorboard", run_dir="<experiment-name>")`.
+This keeps the same directory/database. The trainer restores checkpoint/Step;
+do not run two scalar writers for that Run. Web Tags, Notes and workspace
+edits can coexist with importing.
 
 Generated data belongs in ignored `.local-data/`, outside `cloverboard/` and
 `web/`. It is independent of `.preview/default` and its reset operation.

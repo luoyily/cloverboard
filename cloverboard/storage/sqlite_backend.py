@@ -28,11 +28,32 @@ from cloverboard.storage.protocols import (
     StorageReader,
     StorageWriter,
 )
-from cloverboard.storage.schema import create_schema
+from cloverboard.storage.schema import SCHEMA_VERSION, create_schema
 from cloverboard.tags import normalize_tags
 from cloverboard.storage.paths import UnsafeLogPathError, resolve_log_path, validate_run_id
 
 _sampling_lock = Lock()
+
+
+def read_run_meta(db_path: Path, run_id: str) -> RunMeta:
+    """Validate an existing Run before opening it for resumed writes.
+
+    This read must not create or repair a database: a wrong directory or schema
+    should disable logging rather than overwrite unrelated data.
+    """
+    with _connect_readonly(db_path) as connection:
+        if connection.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+            raise ValueError("Unsupported Run database schema")
+        rows = dict(connection.execute("SELECT key, value FROM meta"))
+        if not {"name", "started_at", "config", "env"}.issubset(rows):
+            raise ValueError("Run database is missing metadata")
+        name, started_at, config, env = (json.loads(rows[key]) for key in ("name", "started_at", "config", "env"))
+        if (name is not None and not isinstance(name, str)) or not isinstance(started_at, (int, float)) or not math.isfinite(started_at):
+            raise ValueError("Invalid Run name or start time")
+        if not isinstance(config, dict) or not isinstance(env, dict):
+            raise ValueError("Invalid Run config or environment")
+        tags = [row[0] for row in connection.execute("SELECT tag FROM tags ORDER BY tag")]
+    return RunMeta(run_id, name, started_at, config, env, normalize_tags(tags))
 
 
 class SqliteStorageWriter:

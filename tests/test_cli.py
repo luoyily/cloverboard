@@ -14,6 +14,43 @@ def test_serve_defaults():
     assert args.peers == ""
 
 
+def test_optional_tensorboard_dependency_is_not_loaded_by_sdk_or_cli(tmp_path):
+    import subprocess
+    import sys
+    import textwrap
+
+    code = textwrap.dedent('''
+        import builtins
+        from pathlib import Path
+        import sys
+        original_import = builtins.__import__
+        def without_tensorboard(name, *args, **kwargs):
+            if name == "tensorboard" or name.startswith("tensorboard."):
+                raise ModuleNotFoundError("TensorBoard intentionally unavailable")
+            return original_import(name, *args, **kwargs)
+        builtins.__import__ = without_tensorboard
+        from cloverboard.cli import build_parser, main
+        from cloverboard import init, log
+        from cloverboard.logger.api import _shutdown
+        root = Path(sys.argv[1])
+        assert build_parser().parse_args(["serve"]).command == "serve"
+        init(logdir=root / "runs", run_dir="native", capture_hardware=False)
+        log({"loss": 1}, step=1)
+        _shutdown()
+        assert (root / "runs/native/run.sqlite").is_file()
+        assert not any(name == "tensorboard" or name.startswith("tensorboard.") for name in sys.modules)
+        try:
+            main(["import-tensorboard", str(root), "--output", str(root / "output")])
+        except SystemExit as error:
+            assert "cloverboard[tensorboard]" in str(error), error
+        else:
+            raise AssertionError("Missing optional dependency must fail clearly")
+        assert not (root / "output").exists()
+    ''')
+    result = subprocess.run([sys.executable, "-c", code, str(tmp_path)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
 def test_serve_passes_workspace_location_and_read_only_mode(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
 

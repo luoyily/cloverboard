@@ -31,6 +31,30 @@ dependencies. Both outputs go into `dist/`; building from source requires
 Node.js, while installing the wheel does not. Local logs, previews and imported
 TensorBoard data are excluded.
 
+## TensorBoard scalar import
+
+Install the optional integration in this checkout, then run the importer and
+server in separate terminals:
+
+```sh
+python -m pip install -e ".[tensorboard]"
+cloverboard import-tensorboard ./tb_logs --output ./clover_runs --follow --interval 5
+cloverboard serve --logdir ./clover_runs
+```
+
+Omit `--follow` for a single import. Source event files are read only; each
+immediate Run subdirectory keeps its name in the output. Event files directly
+in the source root use the root's directory name. Nested Runs and name collisions
+are rejected. Output is a standard CloverBoard logdir, with no extra `runs/`
+level; source and output must not overlap. Only scalars are imported.
+
+Polling checks size, modification time and file identity, then reads appended
+records using retained cursors. Duplicate metric/Step records use filename
+order, then event order, including after restart. Follow mode waits for incomplete
+tails. Restarting replays source files with upserts, preserving config,
+environment, Tags, Notes and Web workspace state. Full details and boundaries
+are in [the import guide](scripts/README.md#import-local-tensorboard-logs).
+
 ## Recording
 
 ```python
@@ -44,6 +68,20 @@ cb.log_image("validation/prediction", image, step=100)
 cb.log_audio("validation/generated", waveform, step=100, sample_rate=24000)
 cb.log_text("debug/output", "A plain text record.\nLine breaks are preserved.", step=100)
 ```
+
+To continue a stable experiment directory, pass its immediate subdirectory name:
+
+```python
+cb.init(logdir="./clover_runs", run_dir="experiment_a", config={"lr": 1e-5})
+```
+
+An absent Run database is initialized; an existing one is reopened for appends.
+The original display name, start time and environment remain. Explicit config
+keys merge, supplied Tags are added, and repeated metric/Step values overwrite.
+Without `run_dir`, each `init()` allocates a new Run. The trainer restores its
+checkpoint and supplies Steps. To take over an imported experiment, stop the
+importer before writing to the same Run from the SDK. Tags, Notes and Views can
+still be edited while importing.
 
 Tags are case-sensitive, single-level strings. A run supports 64 tags, each
 1–80 characters. SDK and UI use incremental add/remove operations so unrelated

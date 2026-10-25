@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 from cloverboard import init, log, log_config
 from cloverboard.logger.api import _shutdown
 from cloverboard.logger.context import get_context
@@ -67,7 +69,8 @@ def test_init_failure_does_not_raise(tmp_path):
     blocked = tmp_path / "runs"
     blocked.write_text("not a directory", encoding="utf-8")
 
-    init(logdir=blocked, capture_hardware=False)
+    with pytest.warns(RuntimeWarning, match="could not initialize logging"):
+        init(logdir=blocked, capture_hardware=False)
 
     context = get_context()
     assert context is not None

@@ -1,4 +1,4 @@
-"""Command line entry point: cloverboard serve."""
+"""Command line entry point for serving and optional data import."""
 
 import argparse
 
@@ -20,11 +20,19 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--peers", default="", help="comma-separated NAME=http://host:port sources; loopback is supported")
     serve.add_argument("--source", action="append", default=[], help="additional local NAME=LOGDIR (repeatable)")
     serve.add_argument("--sources", help="TOML source configuration; fixed keys preserve identity across URL changes")
+    from cloverboard.importers.tensorboard.cli import add_parser
+
+    add_parser(subparsers)
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
+    if args.command == "import-tensorboard":
+        from cloverboard.importers.tensorboard.cli import run
+
+        run(args)
+        return
     if args.command != "serve":
         return
 

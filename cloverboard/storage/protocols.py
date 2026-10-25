@@ -179,7 +179,7 @@ class StorageWriter(Protocol):
     """Write side used by the training process."""
 
     def init_run(self, meta: RunMeta) -> None:
-        """Create the run record; called once per process."""
+        """Initialize metadata for a newly created Run."""
 
     def update_config(self, config_delta: Mapping[str, Any]) -> None:
         """Merge new config keys into the run's config."""

@@ -28,6 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+tensorboard = ["tensorboard>=2.21,<3"]
 dev = [
     "pytest>=9.1,<10",
     "build>=1.6,<2",
