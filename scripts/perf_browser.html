@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CloverBoard Charts performance probe</title>
+<style>body{font:14px system-ui;margin:20px;color:#20252b;background:#f5f6f8}h1{font-size:20px}table{border-collapse:collapse;margin:16px 0;background:white}th,td{border:1px solid #d6dbe1;padding:8px 12px;text-align:left}iframe{width:100%;height:720px;border:1px solid #d6dbe1;background:white}pre{white-space:pre-wrap}a{color:#275b9b}</style>
+</head><body>
+<h1>Charts first-load performance</h1>
+<p>Automated fresh-document measurements through a read-only proxy. Original workspace and experiments are not modified.</p>
+<p id="status" role="status">Starting…</p><table><thead><tr><th>Scenario</th><th>Round</th><th>First curve paint</th><th>Last series JSON</th><th>First paint − last JSON</th><th>Charts</th></tr></thead><tbody id="results"></tbody></table>
+<p>A negative difference means curves became visible while other series were still loading.</p>
+<p id="saved"></p><iframe id="preview" title="Automated Charts measurement"></iframe>
+<script>
+const config = __PERF_CONFIG__, rows = [], cases = config.cases.flatMap(name => Array.from({ length: config.repeats }, (_, round) => ({ name, round })));
+const frame = document.querySelector("iframe"), status = document.querySelector("#status");
+let index = 0;
+function next() {
+  const item = cases[index]; status.textContent = `Measuring ${item.name}, round ${item.round + 1} of ${config.repeats}…`;
+  frame.src = `/?__perf_case=${encodeURIComponent(item.name)}&__perf_round=${item.round}`;
+}
+window.addEventListener("message", async event => {
+  if (event.origin !== location.origin || event.source !== frame.contentWindow || !event.data.cloverboardPerformance) return;
+  const row = event.data.cloverboardPerformance;
+  if (row.case !== cases[index].name || row.round !== cases[index].round) return;
+  rows.push(row);
+  const tr = document.createElement("tr");
+  for (const value of [row.case, row.round + 1, row.error || `${row.first_curve_paint_ms} ms`, `${row.last_series_json_ms} ms`, `${row.post_data_paint_ms} ms`, row.chart_count]) {
+    const td = document.createElement("td"); td.textContent = value; tr.append(td);
+  }
+  document.querySelector("tbody").append(tr); index++;
+  if (index < cases.length) { next(); return; }
+  status.textContent = "Saving results…";
+  try {
+    const response = await fetch("/__perf/result", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rows) });
+    if (!response.ok) throw new Error(`Report save failed: HTTP ${response.status}`);
+    const result = await response.json();
+    document.querySelector("#saved").textContent = `Saved: ${result.saved}`;
+    status.textContent = rows.some(row => row.error || row.errors.length) ? "Finished with errors; inspect the report." : "Finished: all measurements completed.";
+  } catch (error) { status.textContent = error.message; }
+});
+next();
+</script></body></html>

@@ -1,0 +1,9 @@
+include README.md
+include web/package.json web/package-lock.json web/index.html
+include web/tsconfig.json web/vite.config.ts
+recursive-include web/src *.ts *.tsx *.css
+graft web/public
+recursive-include web/tests *.mjs
+recursive-include scripts *.py *.md *.js *.html
+prune dev_docs
+recursive-include tests *.py

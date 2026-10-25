@@ -1,0 +1,45 @@
+# Python environments and caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+
+# Dependencies and build output
+node_modules/
+web/dist/
+build/
+dist/
+
+# Local datasets, runtime state and test artifacts
+/.preview/
+/.local-data/
+/.temp_code/
+runs/
+.workspace/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+events.out.tfevents.*
+*.log
+
+# Local notes, editor settings and environment values
+/dev_docs/
+/design-qa.md
+/.zcodeignore
+.vscode/
+.idea/
+.env
+.env.*
+!.env.example
+
+# Operating system metadata
+.DS_Store
+Thumbs.db

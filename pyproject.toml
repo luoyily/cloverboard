@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=84.2,<85"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cloverboard"
+version = "0.1.0"
+description = "Lightweight local-first experiment tracker for deep learning"
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = [
+    "fastapi>=0.162,<1",
+    "uvicorn>=0.54,<1",
+    "numpy>=2.4,<3",
+    "pydantic>=2.14,<3",
+    "httpx>=0.28,<1",
+    "pillow>=13,<14",
+    "starlette>=1.3,<2",
+    "mcp>=1.30,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1,<10",
+    "build>=1.6,<2",
+]
+
+[project.scripts]
+cloverboard = "cloverboard.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cloverboard*"]
+namespaces = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
