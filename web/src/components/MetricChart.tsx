@@ -1,8 +1,10 @@
-import { useEffect, useId, useMemo, useRef, useState, type PointerEvent } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { scaleLinear, scaleLog } from "d3-scale";
 import { ArrowCounterClockwiseIcon, ArrowsHorizontalIcon, ArrowsInLineHorizontalIcon, WarningIcon } from "@phosphor-icons/react";
 import { seriesKey, type RunSummary, type ScalarPoint, type ScalarSummary } from "../api";
-import { baselineDelta, deltaColumns, targetDelta, targetMet, type ChartZoom, type Target, type TimeDisplay, type DeltaDisplay } from "../features";
+import { baselineDelta, clearYZoom, deltaColumns, targetDelta, targetMet, type ChartZoom, type Target, type TimeDisplay, type DeltaDisplay } from "../features";
+import type { WorkspaceUpdate } from "../workspace";
+import type { MetricSeries } from "../scalarSeries";
 import { formatMetric, runLabel } from "../comparison";
 import { buildPath, compareReadouts, fittedDomain, logTicks, nearestPoint, stepAxis, visiblePoints } from "../chartMath";
 import MetricMenu from "./MetricMenu";
@@ -30,24 +32,24 @@ function formatDelta(value: number | null, decimals: number): string {
 interface MetricChartProps {
   loading: boolean;
   refreshTick: number;
-  expanded: boolean; onExpand: () => void;
-  metric: string; title: string; yScale: "linear" | "log"; scaleOverride?: "linear" | "log"; onScale: (scale: "linear" | "log" | null) => void; runs: RunSummary[]; series: Map<string, ScalarPoint[]>; colors: Map<string, string>; smoothing: number;
+  expanded: boolean; onChange: WorkspaceUpdate;
+  metric: string; title: string; yScale: "linear" | "log"; scaleOverride?: "linear" | "log"; runs: RunSummary[]; series: MetricSeries; colors: Map<string, string>; smoothing: number;
   tooltipDecimals: number;
   tooltipSort: "value" | "list";
   tooltipPlacement: ReadoutPlacement;
   showLegend: boolean;
   onLocateRun: (id: string) => void;
   timeDisplay: TimeDisplay; deltaDisplay: DeltaDisplay;
-  warmupStep?: number; warmupOverride?: number | null; globalWarmup: number | null; onWarmup: (step: number | null | undefined) => void;
+  warmupStep?: number; warmupOverride?: number | null; globalWarmup: number | null;
   summaries: Map<string, ScalarSummary>; target?: Target; baselineId: string | null; zoom?: ChartZoom;
-  onZoom: (zoom: ChartZoom | null) => void;
   focusedId: string | null; onFocusRun: (id: string | null) => void; topIds: Set<string> | null;
 }
 
-export default function MetricChart({ metric, title, loading, refreshTick, expanded, onExpand, yScale, scaleOverride, onScale, runs, series, colors, smoothing, tooltipDecimals, tooltipSort, tooltipPlacement, showLegend, onLocateRun, timeDisplay, deltaDisplay, warmupStep, warmupOverride, globalWarmup, onWarmup, summaries, target, baselineId, zoom, onZoom, focusedId, onFocusRun, topIds }: MetricChartProps) {
+export default memo(function MetricChart({ metric, title, loading, refreshTick, expanded, onChange, yScale, scaleOverride, runs, series, colors, smoothing, tooltipDecimals, tooltipSort, tooltipPlacement, showLegend, onLocateRun, timeDisplay, deltaDisplay, warmupStep, warmupOverride, globalWarmup, summaries, target, baselineId, zoom, focusedId, onFocusRun, topIds }: MetricChartProps) {
   const containerRef = useRef<HTMLDivElement>(null), clipId = useId(), helpId = useId();
   const cardRef = useRef<HTMLElement>(null);
-  const [width, setWidth] = useState(320);
+  const [measuredWidth, setWidth] = useState(0);
+  const width = measuredWidth || 320;
   const [hoverStep, setHoverStep] = useState<number | null>(null);
   const [pinned, setPinned] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -62,10 +64,10 @@ export default function MetricChart({ metric, title, loading, refreshTick, expan
     if (!hoverFrame.current) hoverFrame.current = requestAnimationFrame(() => { hoverFrame.current = 0; setHoverStep(pendingHover.current); });
   }
   function dismissReadout() { clearHover(); setPinned(false); onFocusRun(null); }
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = containerRef.current;
     if (!element) return;
-    const observer = new ResizeObserver(([entry]) => { if (entry) setWidth(entry.contentRect.width); });
+    const observer = new ResizeObserver(([entry]) => { if (entry?.contentRect.width) setWidth(entry.contentRect.width); });
     observer.observe(element); return () => observer.disconnect();
   }, []);
   useEffect(() => { setIncludeTarget(false); }, [target, zoom]);
@@ -73,7 +75,24 @@ export default function MetricChart({ metric, title, loading, refreshTick, expan
   useEffect(() => () => { window.clearTimeout(pinTimer.current); cancelAnimationFrame(hoverFrame.current); }, []);
   useEffect(() => { window.clearTimeout(pinTimer.current); clearHover(); setPinned(false); }, [zoom?.x_min, zoom?.x_max, metric]);
 
-  const entries = useMemo(() => runs.map((run) => ({ run, points: series.get(seriesKey(run.run_id, metric)) ?? [], color: colors.get(run.run_id) ?? "#747e8b" })), [runs, series, metric, colors]);
+  const onExpand = useCallback(() => onChange((state) => ({ expanded_charts: state.expanded_charts.includes(metric) ? state.expanded_charts.filter((item) => item !== metric) : [...state.expanded_charts, metric] })), [metric, onChange]);
+  const onScale = useCallback((scale: "linear" | "log" | null) => onChange((state) => {
+    const chart_scales = { ...state.chart_scales }, chart_zoom = { ...state.chart_zoom };
+    if (scale) chart_scales[metric] = scale; else delete chart_scales[metric];
+    if (chart_zoom[metric]) chart_zoom[metric] = { ...chart_zoom[metric], y_min: null, y_max: null };
+    return { chart_scales, chart_zoom };
+  }), [metric, onChange]);
+  const onWarmup = useCallback((step: number | null | undefined) => onChange((state) => {
+    const chart_warmup = { ...state.chart_warmup };
+    if (step === undefined) delete chart_warmup[metric]; else chart_warmup[metric] = step;
+    return { chart_warmup, chart_zoom: clearYZoom(state.chart_zoom, (name) => name === metric) };
+  }), [metric, onChange]);
+  const onZoom = useCallback((value: ChartZoom | null) => onChange((state) => {
+    const chart_zoom = { ...state.chart_zoom };
+    if (value) chart_zoom[metric] = value; else delete chart_zoom[metric];
+    return { chart_zoom };
+  }), [metric, onChange]);
+  const entries = useMemo(() => runs.map((run) => ({ run, points: series.get(run.run_id) ?? [], color: colors.get(run.run_id) ?? "#747e8b" })), [runs, series, colors]);
   const drawing = useMemo(() => entries.map((entry) => ({ ...entry, points: zoom ? visiblePoints(entry.points, zoom.x_min, zoom.x_max) : entry.points })), [entries, zoom?.x_min, zoom?.x_max]);
   const points = useMemo(() => drawing.flatMap((entry) => entry.points), [drawing]);
   const valid = useMemo(() => points.filter((point) => point.value !== null && Number.isFinite(point.value)), [points]);
@@ -106,10 +125,10 @@ export default function MetricChart({ metric, title, loading, refreshTick, expan
   const left = Math.max(42, ...ticks.map((t) => formatY(t).length * 7 + 12));
   const plotWidth = Math.max(60, width - left - RIGHT);
   const { scale: x, dataWidth, ticks: xTicks, stepAt } = useMemo(() => stepAxis(minStep, maxStep, plotWidth), [minStep, maxStep, plotWidth]);
-  const paths = useMemo(() => drawing.map((entry) => ({ ...entry,
+  const paths = useMemo(() => measuredWidth ? drawing.map((entry) => ({ ...entry,
     rawPath: smoothing > 0 ? buildPath(entry.points, x, y, false, logarithmic) : "",
     path: buildPath(entry.points, x, y, smoothing > 0, logarithmic),
-  })), [drawing, x, y, smoothing, logarithmic]);
+  })) : [], [drawing, x, y, smoothing, logarithmic, measuredWidth]);
   const targetY = target && !targetInvalid ? y(target.value) : null;
   const targetOutside = targetY !== null && (targetY < 0 || targetY > plotHeight);
   const hover = hoverStep === null ? [] : entries.map((entry) => ({ ...entry, point: nearestPoint(entry.points, hoverStep) }))
@@ -227,4 +246,4 @@ export default function MetricChart({ metric, title, loading, refreshTick, expan
     </div>
     {showLegend && <ChartLegend runs={entries.filter((entry) => entry.points.length > 0).map((entry) => entry.run)} colors={colors} width={width} baselineId={baselineId} focusedId={focusedId} onFocusRun={onFocusRun} onLocateRun={onLocateRun} />}
   </article>;
-}
+});

@@ -77,8 +77,9 @@ export function buildPath(points: ScalarPoint[], x: (v: number) => number, y: (v
   for (const point of points) {
     const value = smoothed ? point.smoothed : point.value;
     if (value == null || !Number.isFinite(value) || (positiveOnly && value <= 0)) { drawing = false; continue; }
-    if (!Number.isFinite(x(point.step)) || !Number.isFinite(y(value))) { drawing = false; continue; }
-    parts.push(`${drawing ? "L" : "M"}${x(point.step).toFixed(3)},${y(value).toFixed(3)}`);
+    const px = x(point.step), py = y(value);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) { drawing = false; continue; }
+    parts.push(`${drawing ? "L" : "M"}${px.toFixed(3)},${py.toFixed(3)}`);
     drawing = true;
   }
   return parts.join("");

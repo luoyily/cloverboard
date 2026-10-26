@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getJson } from "./api";
 import { defaultColors, type Target, type ChartZoom, type ColorSettings, type TimeDisplay, type DeltaDisplay } from "./features";
 import { stableValue } from "./comparison";
@@ -207,6 +207,8 @@ function cacheState(key: string, payload: StateSave) {
   }
 }
 
+export type WorkspaceUpdate = (patch: Partial<WorkspaceState> | ((state: WorkspaceState) => Partial<WorkspaceState>)) => void;
+
 export function useWorkspace() {
   const [state, setState] = useState<WorkspaceState>(defaultWorkspaceState);
   const [views, setViews] = useState<SavedView[]>([]);
@@ -305,9 +307,9 @@ export function useWorkspace() {
     return () => window.removeEventListener("pagehide", flush);
   }, [writable]);
 
-  function update(patch: Partial<WorkspaceState>) {
-    setState((previous) => ({ ...previous, ...patch }));
-  }
+  const update: WorkspaceUpdate = useCallback((patch) => {
+    setState((previous) => ({ ...previous, ...(typeof patch === "function" ? patch(previous) : patch) }));
+  }, []);
 
   async function saveView(name: string, viewId?: string) {
     if (!writable) throw new Error("Saved views are read-only. Your viewing changes stay in this browser.");
