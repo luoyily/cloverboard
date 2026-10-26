@@ -4,7 +4,12 @@ import { hexToHsv, hsvToHex, type Hsv } from "../colors";
 export default function ColorPicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const [hsv, setHsv] = useState(() => hexToHsv(/^#[0-9a-f]{6}$/i.test(value) ? value : "#3276b8"));
   const emitted = useRef(value);
-  useEffect(() => { if (value !== emitted.current && /^#[0-9a-f]{6}$/i.test(value)) setHsv(hexToHsv(value)); }, [value]);
+  useEffect(() => {
+    if (value !== emitted.current && /^#[0-9a-f]{6}$/i.test(value)) {
+      emitted.current = value;
+      setHsv(hexToHsv(value));
+    }
+  }, [value]);
   function update(next: Hsv) { setHsv(next); emitted.current = hsvToHex(next); onChange(emitted.current); }
   function pick(event: PointerEvent<HTMLDivElement>) {
     const bounds = event.currentTarget.getBoundingClientRect();

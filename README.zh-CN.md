@@ -117,6 +117,22 @@ Audio 接受 `[-1, 1]` 范围内的 float NumPy 数组、int16 数组或 PCM16 W
   仍可编辑。
 - 搜索旁的 tag 过滤器只隐藏列表行，不改变选择。Dynamic View Rules 支持精确的 tag
   成员条件（any/all/none）以及 tagged/untagged。
+- **Colors** 的 **Random** 和 **By parameter · families** 模式中，**Palette** 可选择
+  内置 Default、Bright 或工作区调色板。
+  Bright 的 12 个基础色写死在代码中。**New palette** 复制当前配色，可修改名称、
+  编辑和排序 2–24 个不重复的 HEX 颜色，也可批量粘贴颜色列表，并查看明暗背景预览。
+  自定义配色先按指定顺序分配，更多 Run 或参数分组自动生成扩展色。**By parameter**
+  为每个参数值分配调色板主色，组内实验使用轻微深浅变化。切换调色板时保留分组映射，
+  以及 Random 模式的实验颜色槽位和手动指定颜色；**Continuous** 继续使用 Viridis。
+  Bright 和自定义配色在白底使用 2:1 对比度，暗底使用 3:1。
+  每个工作区最多保存 32 份自定义调色板，存储于 `<logdir>/.workspace/workspace.sqlite`。
+  View 和共享状态链接携带配色快照，之后编辑或删除库中的调色板不会改变已保存的颜色。
+  只读和共享模式允许选择配色，禁用编辑。
+  调色板 API 为 `GET/POST /api/workspace/palettes` 和
+  `PUT/DELETE /api/workspace/palettes/{id}`，新增和更新的请求体为
+  `{ "name": "My palette", "colors": ["#7ECEF4", "#EA68A2"] }`。
+  `colors.palette` 改为 `{ "kind": "builtin", "id": "bright" }` 或包含
+  `kind: "custom"`、`id`、`name`、`colors` 的自定义快照，API 不再接受旧字符串格式。
 - Table → **Table settings** 控制指标小数位（0–8，默认 4）和可选的 Tags 列。
   已记录的指标和差值使用该格式；已登记参数保持原有表示。较小的非零值和大值使用
   科学计数法。排序和计算使用原始值。

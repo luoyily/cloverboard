@@ -412,15 +412,16 @@ code {
   cursor: pointer;
 }
 
-.button:hover {
+.button:hover:where(:not(:disabled)) {
   background: var(--hover);
   color: var(--text);
 }
 
 button:disabled { cursor: default; opacity: 0.45; }
-.primary-button { border-color: var(--input-border); color: var(--text); font-weight: 500; }
+.primary-button { border-color: transparent; background: var(--selected); color: var(--accent); font-weight: 500; }
+.primary-button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent); }
 .danger-button { color: var(--error); border-color: color-mix(in srgb, var(--error) 45%, var(--border)); }
-.danger-button:hover { color: var(--error); background: color-mix(in srgb, var(--error) 7%, var(--surface)); }
+.danger-button:hover:not(:disabled) { color: var(--error); background: color-mix(in srgb, var(--error) 7%, var(--surface)); }
 
 .quiet-button {
   border-color: transparent;
@@ -645,6 +646,60 @@ button:disabled { cursor: default; opacity: 0.45; }
 .view-save-form { padding: 6px 8px; }
 .view-save-form label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-muted); }
 .text-input { width: 100%; min-width: 0; height: 28px; border: 1px solid var(--input-border); border-radius: var(--radius); background: var(--surface); color: var(--text); padding: 0 8px; }
+/* Keep native select semantics and share styling across every settings menu. */
+select.text-input:not([multiple]) {
+  appearance: none;
+  font-size: 12px;
+  line-height: 18px;
+  padding-inline-end: 28px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: right 12px center, right 8px center;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+select.text-input:hover:not(:disabled) { border-color: var(--text-muted); background-color: var(--hover); }
+select.text-input:focus-visible { border-color: var(--accent); }
+select.text-input:disabled { opacity: .45; cursor: default; }
+select.text-input option, select.text-input optgroup { background: var(--surface); color: var(--text); }
+.select-trigger { display: none; }
+/* Browsers without customizable selects retain their native option popup. */
+@supports (appearance: base-select) and selector(::picker(select)) {
+  select.text-input:not([multiple]), select.text-input:not([multiple])::picker(select) { appearance: base-select; }
+  select.text-input:not([multiple]) { display: flex; align-items: center; gap: 8px; padding-inline-end: 8px; background-image: none; }
+  select.text-input > .select-trigger { display: flex; align-items: center; flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: inherit; }
+  .select-trigger selectedcontent { display: block; min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  select.text-input::picker-icon { color: var(--text-muted); font-size: 11px; flex: none; margin-inline-start: auto; }
+  select.text-input:open { border-color: var(--accent); background-color: var(--hover); }
+  select.text-input:open::picker-icon { rotate: 180deg; }
+  select.text-input::picker(select) {
+    margin-block: 4px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--popover-shadow);
+    font: inherit;
+    max-height: min(320px, 60dvh);
+    max-width: min(480px, calc(100vw - 24px));
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+  select.text-input option { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 8px; border-radius: var(--radius); font: inherit; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+  select.text-input option:hover, select.text-input option:focus { background: var(--hover); outline: none; }
+  select.text-input option:checked { background: var(--selected); color: var(--accent); }
+  select.text-input option::checkmark { order: 1; margin-inline-start: auto; color: var(--accent); font-size: 11px; }
+  select.text-input optgroup { margin: 4px 0; padding: 0; color: var(--text-muted); font-size: 11px; font-weight: 500; }
+  select.text-input optgroup option { color: var(--text); font-size: 12px; font-weight: 400; }
+  select.text-input optgroup option:checked { color: var(--accent); }
+}
+@media (forced-colors: active) {
+  select.text-input:not([multiple]) { appearance: auto; background-image: none; padding-inline-end: 8px; }
+}
 .form-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 .compare-controls { display: flex; align-items: center; gap: 14px; }
 .check-control { display: flex; align-items: center; gap: 8px; min-height: 32px; color: var(--text-muted); font-size: 13px; cursor: pointer; white-space: nowrap; }
@@ -811,11 +866,11 @@ button:disabled { cursor: default; opacity: 0.45; }
 .settings-form { display: flex; flex-direction: column; gap: 10px; padding: 6px 8px 10px; }
 .settings-form label, .field-label { display: flex; flex-direction: column; gap: 4px; color: var(--text-muted); font-size: 12px; }
 .settings-form .check-control { flex-direction: row; gap: 8px; }
-.settings-form select { cursor: pointer; }
 .settings-form .button { align-self: flex-start; }
 .settings-form.compact-settings { gap: 8px; }
 .setting-row, .settings-form label.setting-row { display: grid; grid-template-columns: 78px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 28px; color: var(--text-muted); font-size: 12px; }
 .setting-row > .text-input { justify-self: end; width: 150px; max-width: 100%; }
+.setting-row > .check-control { justify-self: end; }
 .setting-row > input[type="search"] { width: 100%; }
 .setting-row > .number-input { width: 64px; }
 .setting-value { min-width: 0; }
@@ -870,6 +925,29 @@ button:disabled { cursor: default; opacity: 0.45; }
 .dialog-title { display: flex; align-items: center; gap: 8px; padding: 0 8px 8px; border-bottom: 1px solid var(--border); }
 .dialog-title h2 { font-size: 13px; font-weight: 500; margin: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .color-choices { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.palette-preview { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; }
+.palette-preview > span { height: 18px; border-radius: 2px; }
+.palette-library-actions { display: flex; gap: 12px; }
+.palette-library-actions .button { padding-left: 0; padding-right: 0; }
+.palette-delete-confirm { padding: 8px; border: 1px solid var(--border); border-radius: 3px; }
+.palette-dialog { width: min(480px, calc(100vw - 24px)); }
+.palette-editor-fields { border: 0; margin: 0; padding: 12px 8px; min-width: 0; }
+.palette-colors-heading, .palette-color-actions { display: flex; align-items: center; gap: 8px; }
+.palette-colors-heading > span, .palette-color-actions > span { margin-right: auto; }
+.palette-colors-heading .button, .palette-color-actions .button { padding-top: 2px; padding-bottom: 2px; }
+.palette-color-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; padding: 3px; }
+.palette-color-grid .color-choice { min-width: 0; height: 25px; }
+.palette-picker-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 12px; align-items: end; }
+.palette-picker-row .color-square { height: 96px; }
+.palette-bulk { font-size: 12px; }
+.palette-bulk > summary { cursor: pointer; color: var(--text-muted); }
+.palette-bulk > div { margin-top: 8px; }
+.palette-bulk textarea { resize: vertical; }
+.palette-theme-previews { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.palette-theme-preview { border: 1px solid #8883; border-radius: 3px; padding: 8px; font-size: 11px; }
+.palette-theme-preview.preview-light { background: #fff; color: #4b5563; }
+.palette-theme-preview.preview-dark { background: #222831; color: #b1baca; }
+.palette-theme-preview .palette-preview { margin-top: 6px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .color-choice { height: 26px; border: 1px solid #00000018; border-radius: 2px; cursor: pointer; }
 .color-choice[aria-pressed="true"] { outline: 2px solid var(--text); outline-offset: 2px; }
 .color-preview { display: flex; gap: 12px; }

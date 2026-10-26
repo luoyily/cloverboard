@@ -179,9 +179,25 @@ def test_view_list_and_comparison_preferences_roundtrip(tmp_path):
     assert defaults["search_regex"] is False
     assert defaults["targets"] == {}
     assert defaults["colors"]["mode"] == "random"
+    assert defaults["colors"]["palette"] == {"kind": "builtin", "id": "default"}
     assert defaults["tooltip_time"] == "hidden"
     assert defaults["tooltip_delta"] == "both"
     assert defaults["chart_warmup"] == {}
+
+
+def test_curve_palette_survives_workspace_views_and_restart(tmp_path):
+    client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
+    registry = client.put("/api/workspace/colors", json={"keys": ['run:["local","r1"]']}).json()
+    colors = {"palette": {"kind": "builtin", "id": "bright"}, "assignments": {"r1": 17}, "overrides": {"r2": "#EA68A2"}}
+    state = {"colors": colors}
+    assert client.put("/api/workspace/state", json={"state": state, "saved_at": 10}).status_code == 200
+    assert client.post("/api/workspace/views", json={"name": "Bright curves", "state": state}).status_code == 201
+    restored = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
+    snapshot = restored.get("/api/workspace").json()
+    for saved in (snapshot["state"], snapshot["views"][0]["state"]):
+        for key, value in colors.items():
+            assert saved["colors"][key] == value
+    assert restored.get("/api/workspace/colors").json() == registry
 
 
 @pytest.mark.parametrize("mode", ["baseline", "target", "both", "hidden"])
@@ -209,6 +225,7 @@ def test_explicit_delta_preferences_survive_workspace_and_view_restore(tmp_path,
     {"targets": {"loss": {"value": "nan"}}},
     {"chart_zoom": {"loss": {"x_min": 30, "x_max": 10}}},
     {"colors": {"domain": [1, 0]}}, {"colors": {"overrides": {"r1": "red"}}},
+    {"colors": {"palette": "unknown"}},
     {"tooltip_time": "wrong"}, {"tooltip_delta": "wrong"}, {"chart_warmup": {"loss": 1 << 60}},
 ])
 def test_invalid_exploration_state_is_rejected(tmp_path, patch):

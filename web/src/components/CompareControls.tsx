@@ -1,3 +1,4 @@
+import Select from "./Select";
 import { CaretDownIcon, ColumnsIcon } from "@phosphor-icons/react";
 import type { ParameterColumn } from "../comparison";
 import type { WorkspaceState } from "../workspace";
@@ -35,7 +36,7 @@ export default function CompareControls({ state, metrics, chosenMetrics, params,
       <div className="settings-divider" />
       <CheckControl checked={state.differences_only} onChange={(checked) => onChange({ differences_only: checked })}>Different parameters only</CheckControl>
       <label className="setting-row"><span>Decimals</span><input className="text-input number-input" aria-label="Metric decimal places" type="number" min={0} max={8} value={state.table_decimals} onChange={(event) => { const value = Number(event.target.value); if (event.target.value && Number.isInteger(value) && value >= 0 && value <= 8) onChange({ table_decimals: value }); }} /></label>
-      <label className="setting-row"><span>Time column</span><select className="text-input" aria-label="Table time column" value={state.table_time} onChange={(event) => onChange({ table_time: event.target.value as WorkspaceState["table_time"] })}><option value="last_recorded_at">Last recorded</option><option value="started_at">Started</option><option value="hidden">Hidden</option></select></label>
+      <label className="setting-row"><span>Time column</span><Select aria-label="Table time column" value={state.table_time} onChange={(event) => onChange({ table_time: event.target.value as WorkspaceState["table_time"] })}><option value="last_recorded_at">Last recorded</option><option value="started_at">Started</option><option value="hidden">Hidden</option></Select></label>
       <CheckControl checked={state.show_tags_column} onChange={(show_tags_column) => onChange({ show_tags_column })}>Show tags column</CheckControl>
       </div>
       <div className="settings-divider" />

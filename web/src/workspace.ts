@@ -3,6 +3,7 @@ import { getJson } from "./api";
 import { defaultColors, type Target, type ChartZoom, type ColorSettings, type TimeDisplay, type DeltaDisplay } from "./features";
 import { stableValue } from "./comparison";
 import type { ReadoutPlacement } from "./readout";
+import { normalizePalette } from "./palettes";
 
 export interface WorkspaceState {
   version: 1;
@@ -161,6 +162,7 @@ export function normalizeState(state: Partial<WorkspaceState>): WorkspaceState {
   next.colors = { ...defaultColors(), ...c };
   next.colors.field = typeof c?.field === "string" ? c.field : "";
   if (!["random", "parameter", "continuous"].includes(next.colors.mode)) next.colors.mode = "random";
+  next.colors.palette = normalizePalette(c?.palette);
   if (!Array.isArray(c?.domain) || c.domain.length !== 2 || !c.domain.every(finite) || c.domain[0] >= c.domain[1]) next.colors.domain = [0, 1];
   next.colors.overrides = Object.fromEntries(Object.entries(c?.overrides ?? {}).filter(([, v]) => typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v)));
   next.colors.assignments = Object.fromEntries(Object.entries(c?.assignments ?? {}).filter(([, v]) => Number.isInteger(v) && v >= 0 && v <= 100000));

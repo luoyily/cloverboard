@@ -2,7 +2,7 @@
 
 import math
 import re
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from cloverboard.tags import normalize_tags
@@ -155,8 +155,47 @@ class TopKSettings(BaseModel):
     k: int = Field(default=3, ge=1, le=1000)
 
 
+class PaletteInput(BaseModel):
+    model_config = {"extra": "forbid"}
+    name: str = Field(min_length=1, max_length=60)
+    colors: list[str] = Field(min_length=2, max_length=24)
+
+    @field_validator("name")
+    @classmethod
+    def trim_name(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Palette name cannot be empty")
+        return value
+
+    @field_validator("colors")
+    @classmethod
+    def valid_palette_colors(cls, values):
+        if any(not re.fullmatch(r"#[0-9a-fA-F]{6}", value) for value in values):
+            raise ValueError("Palette colors must use six-digit hex notation")
+        values = [value.lower() for value in values]
+        if len(set(values)) != len(values):
+            raise ValueError("Palette colors must be unique")
+        return values
+
+
+class CustomPalette(PaletteInput):
+    id: str = Field(pattern=r"^custom:[0-9a-f]{32}$")
+
+
+class BuiltinPaletteSelection(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal["builtin"] = "builtin"
+    id: Literal["default", "bright"] = "default"
+
+
+class CustomPaletteSelection(CustomPalette):
+    kind: Literal["custom"] = "custom"
+
+
 class ColorSettings(BaseModel):
     mode: Literal["random", "parameter", "continuous"] = "random"
+    palette: Annotated[BuiltinPaletteSelection | CustomPaletteSelection, Field(discriminator="kind")] = Field(default_factory=BuiltinPaletteSelection)
     field: str = ""
     domain: tuple[float, float] = (0, 1)
     overrides: dict[str, str] = Field(default_factory=dict)
@@ -178,6 +217,13 @@ class ColorRegistry(BaseModel):
     version: Literal[1] = 1
     seed: str
     slots: dict[str, int] = Field(default_factory=dict)
+    palettes: list[CustomPalette] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def unique_palettes(self):
+        if len({palette.id for palette in self.palettes}) != len(self.palettes) or len({palette.name.casefold() for palette in self.palettes}) != len(self.palettes):
+            raise ValueError("Palette names and IDs must be unique")
+        return self
 
 
 class ColorAllocation(BaseModel):

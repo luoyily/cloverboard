@@ -1,8 +1,10 @@
 import type { RunSummary } from "./api";
 import type { ResolvedTheme } from "./theme";
 import { categoryKey, parameterValue, runColorKey, type ColorRegistry, type ColorSettings } from "./features";
+import { BRIGHT_COLORS, DEFAULT_PALETTE, paletteBaseColors, paletteKey, type PaletteSelection } from "./palettes";
+export { BRIGHT_COLORS } from "./palettes";
 
-type Pair = { light: string; dark: string };
+type Pair = { light: string; dark: string; lightSource?: string };
 const BACKGROUNDS = { light: "#ffffff", dark: "#222831" };
 const INITIAL: Pair[] = [
   { light: "#3276b8", dark: "#72b2ef" }, { light: "#c05a24", dark: "#f4a266" },
@@ -37,11 +39,12 @@ export function hsvToHex({ h, s, v }: Hsv): string {
 function luminance(color: string): number { const [r, g, b] = rgb(color).map(linear); return r * 0.2126 + g * 0.7152 + b * 0.0722; }
 export function contrast(a: string, b: string): number { const x = luminance(a), y = luminance(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
 
-export function visibleColor(color: string, theme: ResolvedTheme): string {
+export function visibleColor(color: string, theme: ResolvedTheme, palette: PaletteSelection = DEFAULT_PALETTE): string {
   const source = rgb(color), destination = theme === "light" ? [0, 0, 0] : [1, 1, 1];
+  const minimumContrast = theme === "light" && (palette.kind === "custom" || palette.id === "bright") ? 2 : 3;
   for (let i = 0; i <= 100; i++) {
     const next = hex(source.map((v, j) => v + (destination[j] - v) * i / 100));
-    if (contrast(next, BACKGROUNDS[theme]) >= 3) return next;
+    if (contrast(next, BACKGROUNDS[theme]) >= minimumContrast) return next;
   }
   return hex(destination);
 }
@@ -66,22 +69,61 @@ const candidates: Pair[] = [];
 for (let h = 0; h < 360; h += 7) for (const s of [.48, .68, .86]) for (const l of [.34, .44, .54]) {
   candidates.push({ light: visibleColor(hsl(h, s, l), "light"), dark: visibleColor(hsl(h, s, Math.min(.8, l + .25)), "dark") });
 }
-const candidateLabs = candidates.map((p) => ({ light: lab(p.light), dark: lab(p.dark) }));
+// Select slots using the original 3:1 pairs to keep dark identities stable.
+// Retain the source so Bright can render a lighter version on white backgrounds.
+function brightPair(lightSource: string, darkSource = lightSource): Pair {
+  return { light: visibleColor(lightSource, "light"), dark: visibleColor(darkSource, "dark"), lightSource };
+}
+function authoredCandidates(colors: readonly string[]): Pair[] {
+  const result: Pair[] = [];
+  for (const color of colors) for (const offset of [-8, 0, 8]) for (const s of [.45, .6, .75]) for (const l of [.45, .55, .65]) {
+    const hue = (hexToHsv(color).h + offset + 360) % 360;
+    result.push(brightPair(hsl(hue, s, l), hsl(hue, s, l + .2)));
+  }
+  return result;
+}
+function makePool(initial: Pair[], generated: Pair[]) {
+  return { initial, generated, labs: generated.map((p) => ({ light: lab(p.light), dark: lab(p.dark) })) };
+}
+const builtinPools = { default: makePool(INITIAL, candidates), bright: makePool(BRIGHT_COLORS.map((color) => brightPair(color)), authoredCandidates(BRIGHT_COLORS)) };
+const customPools = new Map<string, ReturnType<typeof makePool>>();
+function poolFor(selection: PaletteSelection) {
+  if (selection.kind === "builtin") return builtinPools[selection.id];
+  const key = paletteKey(selection);
+  let pool = customPools.get(key);
+  if (!pool) {
+    pool = makePool(paletteBaseColors(selection).map((color) => brightPair(color)), authoredCandidates(selection.colors));
+    if (customPools.size >= 64) customPools.delete(customPools.keys().next().value!);
+    customPools.set(key, pool);
+  }
+  return pool;
+}
 function labDistance(a: number[], b: number[]): number { return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); }
 
-export function slotColor(slot: number, seed: string, theme: ResolvedTheme): string {
-  let palette = palettes.get(seed);
-  if (!palette) { palette = []; palettes.set(seed, palette); }
+export function slotColor(slot: number, seed: string, theme: ResolvedTheme, selection: PaletteSelection = DEFAULT_PALETTE): string {
+  const cacheKey = JSON.stringify([seed, paletteKey(selection)]);
+  let palette = palettes.get(cacheKey);
+  if (!palette) {
+    if (palettes.size >= 128) { const oldest = palettes.keys().next().value!; palettes.delete(oldest); candidateScores.delete(oldest); }
+    palette = []; palettes.set(cacheKey, palette);
+  }
+  const { initial, generated, labs } = poolFor(selection);
+  const authored = selection.kind === "custom" || selection.id === "bright";
   while (palette.length <= slot) {
-    const pool = palette.length < INITIAL.length ? INITIAL : candidates;
+    // Keep authored palettes in order; preserve the legacy Default ordering.
+    if (authored && palette.length < initial.length) {
+      palette.push(initial[palette.length]);
+      continue;
+    }
+    const pool = palette.length < initial.length ? initial : generated;
     const usedLight = new Set(palette.map((p) => p.light)), usedDark = new Set(palette.map((p) => p.dark));
     let distances: number[] | undefined;
-    if (pool === candidates) {
-      let scores = candidateScores.get(seed);
-      if (!scores) { scores = { distances: candidates.map(() => Infinity), seen: 0 }; candidateScores.set(seed, scores); }
+    if (pool === generated) {
+      let scores = candidateScores.get(cacheKey);
+      if (!scores) { scores = { distances: generated.map(() => Infinity), seen: 0 }; candidateScores.set(cacheKey, scores); }
       for (const previous of palette.slice(scores.seen)) {
         const light = lab(previous.light), dark = lab(previous.dark);
-        for (let i = 0; i < candidates.length; i++) scores.distances[i] = Math.min(scores.distances[i], labDistance(candidateLabs[i].light, light), labDistance(candidateLabs[i].dark, dark));
+        for (let i = 0; i < generated.length; i++) scores.distances[i] = Math.min(scores.distances[i], labDistance(labs[i].light, light), labDistance(labs[i].dark, dark));
       }
       scores.seen = palette.length;
       distances = scores.distances;
@@ -98,13 +140,15 @@ export function slotColor(slot: number, seed: string, theme: ResolvedTheme): str
     if (!best) {
       let n = palette.length;
       do {
-        best = { light: visibleColor(hsl((n * 137.507764 + hash(seed)) % 360, .6 + (n % 5) * .03, .3 + (n % 17) * .01), "light"), dark: visibleColor(hsl((n * 137.507764 + hash(seed)) % 360, .6, .55 + (n % 19) * .01), "dark") };
+        const lightSource = hsl((n * 137.507764 + hash(seed)) % 360, .6 + (n % 5) * .03, .3 + (n % 17) * .01);
+        best = { light: visibleColor(lightSource, "light"), dark: visibleColor(hsl((n * 137.507764 + hash(seed)) % 360, .6, .55 + (n % 19) * .01), "dark"), lightSource };
         n++;
       } while (usedLight.has(best.light) || usedDark.has(best.dark));
     }
     palette.push(best);
   }
-  return palette[slot][theme];
+  const pair = palette[slot];
+  return authored && theme === "light" ? visibleColor(pair.lightSource ?? pair.light, theme, selection) : pair[theme];
 }
 
 export function extendRegistry(registry: ColorRegistry, keys: string[]): ColorRegistry {
@@ -135,12 +179,12 @@ export function resolveColors(runs: RunSummary[], registry: ColorRegistry, setti
       const slot = families.get(categoryKey(settings.field, value));
       if (value === undefined || slot === undefined) color = missing;
       else {
-        const base = rgb(slotColor(slot, registry.seed, theme));
+        const base = rgb(slotColor(slot, registry.seed, theme, settings.palette));
         const blend = (hash(key) % 3) * .07, toward = theme === "light" ? 0 : 1;
-        color = visibleColor(hex(base.map((v) => v + (toward - v) * blend)), theme);
+        color = visibleColor(hex(base.map((v) => v + (toward - v) * blend)), theme, settings.palette);
       }
     } else {
-      color = settings.overrides[key] ? visibleColor(settings.overrides[key], theme) : slotColor(settings.assignments[key] ?? registry.slots[key] ?? 0, registry.seed, theme);
+      color = settings.overrides[key] ? visibleColor(settings.overrides[key], theme, settings.palette) : slotColor(settings.assignments[key] ?? registry.slots[key] ?? 0, registry.seed, theme, settings.palette);
     }
     return [run.run_id, color];
   }));
@@ -157,14 +201,14 @@ export function reassignColors(runs: RunSummary[], selected: Set<string>, regist
     let chosen = -1, score = -Infinity;
     for (let slot = 0; slot < Math.max(32, runs.length * 2); slot++) {
       if (slot === oldSlot) continue;
-      const candidate = { light: slotColor(slot, registry.seed, "light"), dark: slotColor(slot, registry.seed, "dark") };
+      const candidate = { light: slotColor(slot, registry.seed, "light", settings.palette), dark: slotColor(slot, registry.seed, "dark", settings.palette) };
       if (occupied.some((p) => p.light === candidate.light || p.dark === candidate.dark)) continue;
       const distance = occupied.length ? Math.min(...occupied.map((p) => pairDistance(p, candidate))) : 1;
       if (distance > score) { score = distance; chosen = slot; }
     }
     if (chosen >= 0) {
       next.assignments[key] = chosen;
-      occupied.push({ light: slotColor(chosen, registry.seed, "light"), dark: slotColor(chosen, registry.seed, "dark") });
+      occupied.push({ light: slotColor(chosen, registry.seed, "light", settings.palette), dark: slotColor(chosen, registry.seed, "dark", settings.palette) });
     }
   }
   return next;

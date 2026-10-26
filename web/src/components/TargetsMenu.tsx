@@ -1,3 +1,4 @@
+import Select from "./Select";
 import { useRef, useState } from "react";
 import { TargetIcon } from "@phosphor-icons/react";
 import type { Target } from "../features";
@@ -25,7 +26,7 @@ export default function TargetsMenu({ metrics, state, onChange }: { metrics: str
   }
   return <Popover className="targets-menu" label="Targets" trigger={<><TargetIcon size={16} /><span>Targets</span>{Object.keys(state.targets).length > 0 && <small>{Object.keys(state.targets).length}</small>}</>}>
     <div className="menu-heading">Target reference values</div><p className="menu-note">Shared by Charts and Table. Attainment uses latest raw.</p>
-    {metric ? <><label className="target-metric-choice">Metric<select className="text-input" aria-label="Target metric" value={metric} onChange={(event) => setChosen(event.target.value)}>{names.map((name) => <option key={name}>{name}</option>)}</select></label>
+    {metric ? <><label className="target-metric-choice">Metric<Select aria-label="Target metric" value={metric} onChange={(event) => setChosen(event.target.value)}>{names.map((name) => <option key={name}>{name}</option>)}</Select></label>
       <TargetEditor metric={metric} target={state.targets[metric]} onChange={(value) => save(metric, value)} />
       {Object.keys(state.targets).length > 0 && <div className="configured-targets"><div className="settings-divider" /><div className="menu-heading">Configured targets</div>{Object.entries(state.targets).map(([name, value]) => <button className="menu-item" key={name} onClick={() => setChosen(name)}><span>{name}</span><span>{value.direction === "gte" ? "≥" : "≤"} {formatMetric(value.value)}</span></button>)}</div>}</> : <p className="menu-note">Select a run with metrics to set a target.</p>}
   </Popover>;

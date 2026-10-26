@@ -208,7 +208,7 @@ export default function App() {
     return () => { cancelled = true; controller.abort(); };
   }, [ready, needsCatalog, summaryKey, refreshTick]);
 
-  const { colors, registry, localOnly: colorsLocalOnly } = useColors(runs, state.colors, resolvedTheme, workspace.workspaceId, workspace.writable, refreshTick);
+  const { colors, registry, localOnly: colorsLocalOnly, ready: palettesReady, savePalette, deletePalette } = useColors(runs, state.colors, resolvedTheme, workspace.workspaceId, workspace.writable, refreshTick);
   const visibleSummaries = loadedSummary === summaryKey ? summaries : new Map<string, ScalarSummary>();
   const topIds = useMemo(() => loadedSummary === summaryKey ? topRunIds(selectedRuns, summaries, state.colors.top_k) : null, [selectedRuns, summaries, state.colors.top_k, loadedSummary, summaryKey]);
   const configs = useMemo(() => new Map(selectedRuns.map((run) => [run.run_id, flattenConfig(run.config)])), [selectedRuns]);
@@ -278,7 +278,7 @@ export default function App() {
         state={state} views={workspace.views} writable={workspace.writable} ready={ready} localOnly={workspace.localOnly}
         onChange={update} onOpenView={workspace.openView} onSaveView={workspace.saveView} onDeleteView={workspace.deleteView} onRenameView={workspace.renameView}
         metrics={metrics}
-        colorControls={<ColorMenu runs={runs} selectedIds={selectedIds} settings={state.colors} registry={registry} localOnly={colorsLocalOnly} onChange={(colors) => update({ colors })} />}
+        colorControls={<ColorMenu runs={runs} selectedIds={selectedIds} settings={state.colors} registry={registry} theme={resolvedTheme} localOnly={colorsLocalOnly} writable={workspace.writable} ready={palettesReady} onSavePalette={savePalette} onDeletePalette={deletePalette} onChange={(colors) => update({ colors })} />}
         compareControls={<CompareControls state={state} metrics={metrics} chosenMetrics={chosenMetrics} params={params} onChange={update} />} />
       <main className="content" id="workspace-panel" role="tabpanel" aria-labelledby={`${state.panel}-tab`} tabIndex={0}>
         {workspace.linkNotice && <p className="workspace-notice" role="status">{workspace.linkNotice}</p>}

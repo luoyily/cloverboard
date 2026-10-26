@@ -1,3 +1,4 @@
+import Select from "./Select";
 import type { CSSProperties } from "react";
 import { CaretDownIcon, SlidersHorizontalIcon } from "@phosphor-icons/react";
 import Popover from "./Popover";
@@ -44,7 +45,7 @@ export default function ChartToolbar({ metricFilter, onMetricFilterChange, densi
       <div className="setting-row"><span className="field-label">Placement</span><SegmentedControl label="Hover placement" value={tooltipPlacement} options={[{ value: "vertical", label: "Vertical first" }, { value: "horizontal", label: "Horizontal first" }]} onChange={onTooltipPlacementChange} /></div>
       <label className="setting-row"><span>Decimals</span><input className="text-input number-input" type="number" aria-label="Hover decimal places" min={0} max={8} value={tooltipDecimals} onChange={(event) => { const value = Number(event.target.value); if (event.target.value && Number.isInteger(value) && value >= 0 && value <= 8) onTooltipDecimalsChange(value); }} /></label>
       <div className="setting-row"><span className="field-label">Order</span><SegmentedControl label="Hover order" value={tooltipSort} options={[{ value: "value", label: smoothing > 0 ? "EMA ↓" : "Raw ↓" }, { value: "list", label: "Run list" }]} onChange={onTooltipSortChange} /></div>
-      <label className="setting-row"><span>Time</span><select className="text-input" aria-label="Hover time" value={timeDisplay} onChange={(event) => onTimeDisplayChange(event.target.value as TimeDisplay)}><option value="hidden">Hidden</option><option value="elapsed">Elapsed</option><option value="wall">Wall time</option></select></label>
+      <label className="setting-row"><span>Time</span><Select aria-label="Hover time" value={timeDisplay} onChange={(event) => onTimeDisplayChange(event.target.value as TimeDisplay)}><option value="hidden">Hidden</option><option value="elapsed">Elapsed</option><option value="wall">Wall time</option></Select></label>
       <div className="setting-row"><span className="field-label">Differences</span><div className="delta-options"><CheckControl checked={showBase} onChange={(checked) => setDelta(checked, showTarget)}>Δ Base</CheckControl><CheckControl checked={showTarget} onChange={(checked) => setDelta(showBase, checked)}>Δ Target</CheckControl></div></div>
       <p className="field-help">Baseline stays first. Differences use raw values.</p>
     </div></details>

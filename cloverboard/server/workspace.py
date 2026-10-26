@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from cloverboard.server.models import (
     SavedView, SavedViewInput, ViewRename, WorkspaceSave, WorkspaceSnapshot,
-    WorkspaceState, ColorRegistry, ColorAllocation,
+    WorkspaceState, ColorRegistry, ColorAllocation, PaletteInput, CustomPalette,
 )
 from cloverboard.storage.paths import resolve_log_path
 
@@ -88,14 +88,7 @@ class WorkspaceStore:
 
     def colors(self, keys: list[str] | None = None) -> ColorRegistry:
         with self._connection(write=keys is not None) as connection:
-            row = connection.execute("SELECT payload FROM color_registry WHERE id=1").fetchone() if connection else None
-            try:
-                colors = ColorRegistry.model_validate_json(row[0]) if row else ColorRegistry(seed=self._seed)
-                slots = list(colors.slots.values())
-                if len(set(slots)) != len(slots) or any(slot < 0 or slot > 100000 for slot in slots):
-                    raise ValueError("Invalid color allocation")
-            except (ValidationError, ValueError):
-                colors = ColorRegistry(seed=self._seed)
+            colors = self._read_colors(connection)
             if keys is not None:
                 slots = dict(colors.slots)
                 next_slot = max(slots.values(), default=-1) + 1
@@ -106,6 +99,43 @@ class WorkspaceStore:
                 colors = colors.model_copy(update={"slots": slots})
                 connection.execute("INSERT OR REPLACE INTO color_registry VALUES (1, ?)", (colors.model_dump_json(),))
             return colors
+
+    def _read_colors(self, connection) -> ColorRegistry:
+        row = connection.execute("SELECT payload FROM color_registry WHERE id=1").fetchone() if connection else None
+        try:
+            colors = ColorRegistry.model_validate_json(row[0]) if row else ColorRegistry(seed=self._seed)
+        except ValidationError as error:
+            raise HTTPException(503, "Invalid workspace color registry") from error
+        slots = list(colors.slots.values())
+        if len(set(slots)) != len(slots) or any(slot < 0 or slot > 100000 for slot in slots):
+            raise HTTPException(503, "Invalid workspace color registry")
+        return colors
+
+    def save_palette(self, payload: PaletteInput, palette_id: str | None = None) -> CustomPalette:
+        with self._connection(write=True) as connection:
+            colors = self._read_colors(connection)
+            existing = next((palette for palette in colors.palettes if palette.id == palette_id), None)
+            if palette_id is not None and existing is None:
+                raise HTTPException(404, "Custom palette not found")
+            if any(palette.id != palette_id and palette.name.casefold() == payload.name.casefold() for palette in colors.palettes):
+                raise HTTPException(409, "A palette with this name already exists")
+            if palette_id is None and len(colors.palettes) >= 32:
+                raise HTTPException(409, "A workspace can contain at most 32 custom palettes")
+            palette = CustomPalette(id=palette_id or f"custom:{uuid4().hex}", **payload.model_dump())
+            palettes = [palette if item.id == palette_id else item for item in colors.palettes] if existing else [*colors.palettes, palette]
+            colors = colors.model_copy(update={"palettes": palettes})
+            connection.execute("INSERT OR REPLACE INTO color_registry VALUES (1, ?)", (colors.model_dump_json(),))
+            return palette
+
+    def delete_palette(self, palette_id: str) -> CustomPalette:
+        with self._connection(write=True) as connection:
+            colors = self._read_colors(connection)
+            palette = next((item for item in colors.palettes if item.id == palette_id), None)
+            if palette is None:
+                raise HTTPException(404, "Custom palette not found")
+            colors = colors.model_copy(update={"palettes": [item for item in colors.palettes if item.id != palette_id]})
+            connection.execute("INSERT OR REPLACE INTO color_registry VALUES (1, ?)", (colors.model_dump_json(),))
+            return palette
 
     def snapshot(self) -> WorkspaceSnapshot:
         with self._connection() as connection:
@@ -197,6 +227,30 @@ def read_colors(store: WorkspaceStore = Depends(get_workspace)):
 def allocate_colors(payload: ColorAllocation, store: WorkspaceStore = Depends(get_workspace)):
     """Allocate missing keys without replacing existing slots; return the full registry."""
     return store.colors(payload.keys)
+
+
+@router.get("/palettes", response_model=list[CustomPalette])
+def read_palettes(store: WorkspaceStore = Depends(get_workspace)):
+    """Read the workspace's custom palette library; built-ins live in the frontend."""
+    return store.colors().palettes
+
+
+@router.post("/palettes", response_model=CustomPalette, status_code=201)
+def create_palette(payload: PaletteInput, store: WorkspaceStore = Depends(get_workspace)):
+    """Create a custom palette with a workspace-unique name and a generated ID."""
+    return store.save_palette(payload)
+
+
+@router.put("/palettes/{palette_id}", response_model=CustomPalette)
+def update_palette(palette_id: str, payload: PaletteInput, store: WorkspaceStore = Depends(get_workspace)):
+    """Replace a custom palette's name and ordered colors."""
+    return store.save_palette(payload, palette_id)
+
+
+@router.delete("/palettes/{palette_id}", response_model=CustomPalette)
+def delete_palette(palette_id: str, store: WorkspaceStore = Depends(get_workspace)):
+    """Remove a palette from the library; saved viewing snapshots remain self-contained."""
+    return store.delete_palette(palette_id)
 
 
 @router.put("/state", response_model=WorkspaceSnapshot)

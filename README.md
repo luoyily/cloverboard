@@ -125,6 +125,26 @@ the queue; forcibly killing a process can lose pending records.
   local source directories remain editable.
 - The tag filter beside search only hides list rows. Selection stays unchanged.
   Dynamic View Rules support exact tag membership (any/all/none) and tagged/untagged.
+- **Colors** → **Palette** in **Random** or **By parameter · families** selects the
+  built-in Default/Bright palettes or a workspace palette. Bright's 12 colors are
+  defined in code. **New palette**
+  copies the selected palette; edit its name and 2–24 unique HEX colors, reorder
+  colors, or paste a color list. Light/dark previews show the displayed colors.
+  Custom palettes use their authored order, then generate extra shades for more runs
+  or parameter families. In **By parameter**, each value gets a palette color and
+  runs in that family use subtle shades. Switching palettes preserves category
+  assignments and Random's run slots and manual colors. **Continuous** keeps Viridis.
+  Bright/custom palettes
+  retain more brightness on white (2:1 contrast); dark backgrounds use 3:1.
+  Up to 32 custom palettes are saved in `<logdir>/.workspace/workspace.sqlite`.
+  Views and shared state links carry a palette snapshot, so later library edits or
+  deletion do not change saved colors. Read-only/share mode allows selection only.
+  Library API: `GET/POST /api/workspace/palettes` and
+  `PUT/DELETE /api/workspace/palettes/{id}`. Create/update bodies are
+  `{ "name": "My palette", "colors": ["#7ECEF4", "#EA68A2"] }`.
+  `colors.palette` now uses `{ "kind": "builtin", "id": "bright" }` or a custom
+  snapshot `{ "kind": "custom", "id": "custom:…", "name": "…", "colors": […] }`;
+  the previous string format is no longer accepted by the API.
 - Table → **Table settings** controls metric decimal places (0–8, default 4)
   and the optional Tags column. Recorded metrics and deltas use this formatting;
   registered parameters keep their existing representation. Small nonzero values

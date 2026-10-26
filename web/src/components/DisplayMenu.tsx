@@ -1,3 +1,4 @@
+import Select from "./Select";
 import { EyeIcon, CaretDownIcon } from "@phosphor-icons/react";
 import type { TopK } from "../features";
 import CheckControl from "./CheckControl";
@@ -11,7 +12,7 @@ export default function DisplayMenu({ settings, metrics, onChange }: { settings:
     <div className="settings-form">
       <CheckControl checked={settings.enabled} onChange={(enabled) => patch({ enabled, metric: settings.metric || metrics[0] || "" })}>Emphasize Top-K</CheckControl>
       {settings.enabled && <>
-        <label>Metric<select className="text-input" value={settings.metric} onChange={(e) => patch({ metric: e.target.value })}>{metrics.map((m) => <option key={m}>{m}</option>)}{!metrics.includes(settings.metric) && <option value={settings.metric}>{settings.metric || "No metrics"}</option>}</select></label>
+        <label>Metric<Select value={settings.metric} onChange={(e) => patch({ metric: e.target.value })}>{metrics.map((m) => <option key={m}>{m}</option>)}{!metrics.includes(settings.metric) && <option value={settings.metric}>{settings.metric || "No metrics"}</option>}</Select></label>
         <div className="setting-row"><span className="field-label">Direction</span><SegmentedControl label="Top-K direction" value={settings.direction} options={[{ value: "max", label: "Higher" }, { value: "min", label: "Lower" }]} onChange={(direction) => patch({ direction })} /></div>
         <div className="setting-row"><span className="field-label">Readout</span><SegmentedControl label="Top-K readout" value={settings.readout} options={[{ value: "latest", label: "Latest raw" }, { value: "best", label: "Best raw" }]} onChange={(readout) => patch({ readout })} /></div>
         <label className="setting-row"><span>Runs</span><input type="number" className="text-input number-input" aria-label="Runs to emphasize" min={1} max={1000} value={settings.k} onChange={(e) => { const k = Number(e.target.value); if (e.target.value && Number.isInteger(k) && k > 0 && k <= 1000) patch({ k }); }} /></label>

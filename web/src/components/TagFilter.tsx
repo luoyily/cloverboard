@@ -1,3 +1,4 @@
+import Select from "./Select";
 import { TagIcon, XIcon } from "@phosphor-icons/react";
 import type { RunSummary } from "../api";
 import type { WorkspaceState } from "../workspace";
@@ -9,7 +10,7 @@ export default function TagFilter({ runs, state, onChange }: { runs: RunSummary[
   const active = state.tag_filter.length > 0 || state.tag_filter_match === "empty";
   return <Popover className={`tag-filter${active ? " filter-active" : ""}`} label="Filter runs by tags" trigger={<><TagIcon size={16} />{active && <span className="filter-dot" />}</>}>
     <div className="menu-heading">Filter list by tags</div>
-    <div className="settings-form"><label>Match<select className="text-input" value={state.tag_filter_match} onChange={(event) => onChange({ tag_filter_match: event.target.value as WorkspaceState["tag_filter_match"] })}><option value="any">Any selected tag</option><option value="all">All selected tags</option><option value="none">None of selected tags</option><option value="empty">No tags</option></select></label>
+    <div className="settings-form"><label>Match<Select value={state.tag_filter_match} onChange={(event) => onChange({ tag_filter_match: event.target.value as WorkspaceState["tag_filter_match"] })}><option value="any">Any selected tag</option><option value="all">All selected tags</option><option value="none">None of selected tags</option><option value="empty">No tags</option></Select></label>
       {state.tag_filter_match !== "empty" && <div className="tag-options">{tags.map((tag) => <CheckControl key={tag} checked={state.tag_filter.includes(tag)} onChange={(checked) => onChange({ tag_filter: checked ? [...state.tag_filter, tag] : state.tag_filter.filter((value) => value !== tag) })}>{tag}</CheckControl>)}{!tags.length && <p className="field-help">No tags yet. Add tags from a run’s menu.</p>}</div>}
       <p className="field-help">Filters visible rows. Your run selection stays unchanged.</p>
       <button className="button quiet-button" disabled={!active} onClick={() => onChange({ tag_filter: [], tag_filter_match: "any" })}>Clear tag filter</button>
