@@ -50,10 +50,15 @@ level; source and output must not overlap. Only scalars are imported.
 
 Polling checks size, modification time and file identity, then reads appended
 records using retained cursors. Duplicate metric/Step records use filename
-order, then event order, including after restart. Follow mode waits for incomplete
-tails. Restarting replays source files with upserts, preserving config,
-environment, Tags, Notes and Web workspace state. Full details and boundaries
-are in [the import guide](scripts/README.md#import-local-tensorboard-logs).
+order, then event order, including after restart. Follow mode waits for truncated
+tails; a complete but invalid event record stops the importer with an error.
+Restarting re-reads all current source files and upserts scalars into the
+existing Run database; it does not recreate or clear that database. Matching
+metric/Step values are updated, new points are inserted, and points no longer
+present in the source are retained. Run name, start time, config, environment,
+Tags, Notes, media/text and Web workspace state are not modified. Full details
+and boundaries are in
+[the import guide](scripts/README.md#import-local-tensorboard-logs).
 
 ## Recording
 

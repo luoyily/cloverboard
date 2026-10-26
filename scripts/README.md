@@ -13,9 +13,9 @@ cloverboard serve --logdir .local-data/tensorboard --port 6040
 ```
 
 The importer and server run in separate terminals. Ctrl+C stops following and
-releases the output lock. Omit `--follow` for a single pass; it rejects an
-incomplete/corrupt tail instead of waiting. `python -m cloverboard.cli` also works
-when the console command is unavailable.
+releases the output lock. Omit `--follow` for a single pass; it rejects a
+truncated or invalid tail instead of waiting. `python -m cloverboard.cli` also
+works when the console command is unavailable.
 
 Each immediate subdirectory with event files becomes `output/<name>/run.sqlite`.
 Files in the source root become `output/<source-name>/run.sqlite`. Nested event
@@ -42,14 +42,20 @@ same-size modifications replay only the affected Run. Source-only points remain
 in the target when source files are removed. The source is authoritative for
 metric/Step keys it still contains. Stat-based monitoring assumes appended
 event files; arbitrary same-inode rewrites that also grow a file are outside
-this contract. Follow mode reports incomplete/corrupt tails and retries when
-the file changes; a permanently corrupt tail needs attention at the source.
+this contract. Follow mode waits for truncated/incomplete tails and retries
+when the file grows. A complete but invalid event protobuf is a hard error that
+stops the importer; the source file needs attention.
 
-Event cursors and duplicate precedence are held in memory. Restarting reads
-history again and upserts, preserving Run name, start time, config, environment,
-Tags, Notes and workspace Views/settings. New Runs are published after their
-first successful pass; existing Runs commit batches, so a failed pass may have
-written a valid prefix. Retrying is safe. The output's
+Event cursors and duplicate precedence are held in memory; no byte offsets are
+persisted. Restarting re-reads all current event files and upserts scalars into
+the existing Run database without recreating or clearing it. Matching
+metric/Step values and timestamps are updated, new points are inserted, and
+points no longer present in the source are retained. Run name, start time,
+config, environment, Tags, Notes, media/text and workspace Views/settings are
+not modified. Removed source files therefore do not clean target history; this
+is an intentional incremental-import boundary. New Runs are published after
+their first successful pass; existing Runs commit batches, so a failed pass may
+have written a valid prefix. Retrying is safe. The output's
 `.workspace/tensorboard-import.sqlite` holds the source binding and a process
 lock, independently of `workspace.sqlite`; it stores no byte checkpoints. A
 crash releases the lock automatically. Run one importer per output.
