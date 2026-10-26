@@ -55,7 +55,7 @@ def test_application_owns_peer_pool_until_shutdown(monkeypatch):
 
     monkeypatch.setattr(module, "httpx", SimpleNamespace(Client=make_client, HTTPError=httpx.HTTPError))
     app = create_app(FakeStorageReader(), sources=[Source("peer", "Peer", url="https://peer.test")])
-    with TestClient(app) as browser:
+    with TestClient(app, base_url="http://127.0.0.1") as browser:
         assert len(clients) == 1 and not clients[0].is_closed
         assert browser.get("/api/runs").status_code == 200
         assert browser.get("/api/runs?local_only=true").json() == []

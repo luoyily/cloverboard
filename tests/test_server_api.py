@@ -6,7 +6,7 @@ from tests.fakes import FakeStorageReader
 
 
 def test_runs_endpoint_returns_empty_without_backend():
-    client = TestClient(create_app())
+    client = TestClient(create_app(), base_url="http://127.0.0.1")
 
     response = client.get("/api/runs")
 
@@ -15,7 +15,7 @@ def test_runs_endpoint_returns_empty_without_backend():
 
 
 def test_scalars_endpoint_returns_not_found_without_backend():
-    client = TestClient(create_app())
+    client = TestClient(create_app(), base_url="http://127.0.0.1")
 
     response = client.get("/api/scalars", params={"run_id": "r1", "metric": "loss"})
 
@@ -34,7 +34,7 @@ def test_runs_endpoint_serializes_reader_output():
             )
         ]
     )
-    client = TestClient(create_app(reader))
+    client = TestClient(create_app(reader), base_url="http://127.0.0.1")
 
     payload = client.get("/api/runs").json()
 
@@ -54,7 +54,7 @@ def test_scalars_endpoint_serializes_points():
     reader = FakeStorageReader(
         series={("r1", "train/loss"): [ScalarPoint(step=1, value=0.5)]}
     )
-    client = TestClient(create_app(reader))
+    client = TestClient(create_app(reader), base_url="http://127.0.0.1")
 
     payload = client.get(
         "/api/scalars", params={"run_id": "r1", "metric": "train/loss"}
@@ -64,7 +64,7 @@ def test_scalars_endpoint_serializes_points():
 
 
 def test_scalars_endpoint_validates_max_points():
-    client = TestClient(create_app(FakeStorageReader(runs=[RunSummary("r1", None, 0)])))
+    client = TestClient(create_app(FakeStorageReader(runs=[RunSummary("r1", None, 0)])), base_url="http://127.0.0.1")
 
     response = client.get(
         "/api/scalars",
@@ -77,7 +77,7 @@ def test_scalars_endpoint_validates_max_points():
 def test_batch_scalars_is_a_bounded_authenticated_read_with_single_series_semantics():
     reader = FakeStorageReader(series={("r1", "loss"): [ScalarPoint(0, 2), ScalarPoint(1, float("nan")), ScalarPoint(2, 4)]})
     app = create_app(reader, share=True)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     params = [("run_id", "r1"), ("metrics", "loss"), ("metrics", "missing"), ("smoothing", .5)]
     assert client.get("/api/scalars-batch", params=params).status_code == 401
     client.headers["Authorization"] = f"Bearer {app.state.access_token}"
@@ -105,7 +105,7 @@ def test_scalars_endpoint_maps_non_finite_values_to_null():
             ]
         }
     )
-    client = TestClient(create_app(reader))
+    client = TestClient(create_app(reader), base_url="http://127.0.0.1")
 
     payload = client.get(
         "/api/scalars", params={"run_id": "r1", "metric": "loss"}
@@ -119,7 +119,7 @@ def test_scalars_endpoint_maps_non_finite_values_to_null():
 
 def test_static_site_is_mounted(tmp_path):
     (tmp_path / "index.html").write_text("<html>cloverboard</html>", encoding="utf-8")
-    client = TestClient(create_app(static_dir=tmp_path))
+    client = TestClient(create_app(static_dir=tmp_path), base_url="http://127.0.0.1")
 
     response = client.get("/")
 
@@ -128,7 +128,7 @@ def test_static_site_is_mounted(tmp_path):
 
 
 def test_metrics_endpoint_returns_not_found_without_backend():
-    client = TestClient(create_app())
+    client = TestClient(create_app(), base_url="http://127.0.0.1")
 
     response = client.get("/api/metrics", params={"run_id": "r1"})
 
@@ -144,7 +144,7 @@ def test_metrics_endpoint_lists_reader_metrics():
             ("r2", "train/loss"): [ScalarPoint(step=1, value=0.4)],
         }
     )
-    client = TestClient(create_app(reader))
+    client = TestClient(create_app(reader), base_url="http://127.0.0.1")
 
     payload = client.get("/api/metrics", params={"run_id": "r1"}).json()
 

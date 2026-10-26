@@ -7,7 +7,7 @@ from cloverboard.server.app import create_app
 
 
 def _client(logdir, **kwargs):
-    return TestClient(create_app(logdir=logdir, **kwargs))
+    return TestClient(create_app(logdir=logdir, **kwargs), base_url="http://127.0.0.1")
 
 
 def _save(client, state, saved_at=100):

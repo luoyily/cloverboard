@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from cloverboard.server.routes import router
-from cloverboard.server.security import SecurityMiddleware
+from cloverboard.server.security import McpBodyGuard, SecurityMiddleware, host_allowlist
 from cloverboard.server.workspace import WorkspaceStore, router as workspace_router
 from cloverboard.storage.paths import UnsafeLogPathError
 from cloverboard.storage.protocols import RunNotFound, StorageReader
@@ -74,7 +74,13 @@ def create_app(
     app.state.mcp = mcp
     read_only = read_only or share
     app.state.access_token = secrets.token_urlsafe(16) if share else None
-    app.add_middleware(SecurityMiddleware, token=app.state.access_token, read_only=read_only)
+    # McpBodyGuard is registered first so SecurityMiddleware stays outermost:
+    # authentication runs before any request body is read. Tokenless servers also
+    # reject foreign Host headers (DNS-rebinding protection); share mode keeps
+    # serving whatever public Host the tunnel forwards, with the token as the gate.
+    app.add_middleware(McpBodyGuard)
+    app.add_middleware(SecurityMiddleware, token=app.state.access_token, read_only=read_only,
+                       allowed_hosts=None if share else host_allowlist(host))
 
     @app.exception_handler(UnsafeLogPathError)
     async def reject_unsafe_path(request: Request, error: UnsafeLogPathError):

@@ -22,7 +22,7 @@ def client(tmp_path):
         if name == "recorded":
             writer.append_scalars([ScalarRecord("loss", 1, 200, 3), ScalarRecord("loss", 5, 150, 1)])
         writer.flush_and_close()
-    with TestClient(create_app(SqliteStorageReader(tmp_path))) as value:
+    with TestClient(create_app(SqliteStorageReader(tmp_path)), base_url="http://127.0.0.1") as value:
         yield value
 
 
@@ -73,7 +73,7 @@ def test_storage_failures_are_not_empty_results(tmp_path, broken_schema):
         sqlite3.connect(database).close()
     else:
         database.write_bytes(b"not a SQLite database")
-    client = TestClient(create_app(SqliteStorageReader(tmp_path)))
+    client = TestClient(create_app(SqliteStorageReader(tmp_path)), base_url="http://127.0.0.1")
     for route, query in [("runs", {}), ("metrics", {}), ("scalars", {"metric": "loss"}), ("run-details", {})]:
         response = client.get(f"/api/{route}", params={"run_id": "broken", **query})
         assert response.status_code == 503
@@ -93,7 +93,7 @@ def test_peer_query_errors_preserve_meaning(monkeypatch, status, detail):
     with httpx.Client(transport=httpx.MockTransport(reply)) as peer:
         monkeypatch.setattr(SourceReader, "open", lambda self: peer)
         app = create_app(sources=[Source("peer", "Peer", url="http://peer")])
-        response = TestClient(app).get("/api/metrics", params={"run_id": qualify("peer", "missing")})
+        response = TestClient(app, base_url="http://127.0.0.1").get("/api/metrics", params={"run_id": qualify("peer", "missing")})
     assert response.status_code == status
     assert response.json() == {"detail": detail if status != 503 else "Source Peer is unavailable"}
 

@@ -38,7 +38,7 @@ def test_browser_probe_isolates_workspace_blocks_writes_and_saves_results(tmp_pa
                 "state": {"selected_ids": ["untouched"], "panel": "table", "baseline_id": "untouched"}, "views": []}
     app = create_probe_app("http://service", {}, report, original, 1, output, 60)
     app.state.server = SimpleNamespace(should_exit=False)
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         snapshot = client.get("/api/workspace", headers={"X-Cloverboard-Perf-Case": "mixed", "X-Cloverboard-Perf-Round": "1"}).json()
         assert snapshot["workspace_id"] != "original" and snapshot["writable"] is False
         assert snapshot["state"]["panel"] == "charts" and snapshot["state"]["refresh_interval"] == 0

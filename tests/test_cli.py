@@ -63,7 +63,7 @@ def test_serve_passes_workspace_location_and_read_only_mode(monkeypatch, tmp_pat
 
     monkeypatch.setattr("uvicorn.run", capture_app)
     main(["serve", "--logdir", str(tmp_path), "--read-only"])
-    client = TestClient(captured["app"])
+    client = TestClient(captured["app"], base_url="http://127.0.0.1")
     assert client.get("/api/workspace").json()["writable"] is False
     response = client.put("/api/workspace/state", json={"state": {}, "saved_at": 100})
     assert response.status_code == 403
@@ -87,7 +87,7 @@ def test_share_prints_a_fresh_working_link_and_forces_read_only(monkeypatch, tmp
         assert parsed.hostname == expected_host
         assert parsed.port == 6789
         token = parse_qs(parsed.query)["token"][0]
-        client = TestClient(applications[-1])
+        client = TestClient(applications[-1], base_url="http://127.0.0.1")
         assert client.get("/api/runs").status_code == 401
         headers = {"Authorization": f"Bearer {token}"}
         assert client.get("/api/workspace", headers=headers).json()["writable"] is False

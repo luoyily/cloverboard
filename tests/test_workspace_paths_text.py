@@ -137,7 +137,7 @@ def test_invalid_text_warns_and_skips(tmp_path, name, text, step):
 def test_text_http_local_share_and_workspace_view(recorded):
     reader, run_id = recorded
     app = create_app(reader, share=True)
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         query = {"run_id": run_id, "name": "debug/output"}
         assert client.get("/api/text", params=query).status_code == 401
         auth = {"Authorization": f"Bearer {app.state.access_token}"}
@@ -146,7 +146,7 @@ def test_text_http_local_share_and_workspace_view(recorded):
         assert client.get("/api/text-names", params={"run_id": run_id}, headers=auth).json()[0]["name"] == "debug/empty"
         assert client.get("/api/text-timeline", params=query, headers=auth).json()["steps"] == [0, 10, 20]
         assert client.get("/api/text", params={**query, "step": 2**70}, headers=auth).status_code == 422
-    with TestClient(create_app(reader)) as client:
+    with TestClient(create_app(reader), base_url="http://127.0.0.1") as client:
         state = {"panel": "images", "media_type": "text", "text_name": "debug/output", "text_step": 10}
         saved = client.post("/api/workspace/views", json={"name": "Text", "state": state}).json()
         assert all(saved["state"][key] == value for key, value in state.items())
@@ -154,7 +154,7 @@ def test_text_http_local_share_and_workspace_view(recorded):
 
 def test_text_local_source_and_peer_forwarding_preserve_actual_step(recorded, monkeypatch):
     reader, run_id = recorded
-    leaf = TestClient(create_app(reader))
+    leaf = TestClient(create_app(reader), base_url="http://127.0.0.1")
     def request(request):
         assert request.url.params["local_only"] == "true"
         reply = leaf.get(request.url.path, params=dict(request.url.params))
@@ -162,7 +162,7 @@ def test_text_local_source_and_peer_forwarding_preserve_actual_step(recorded, mo
     with httpx.Client(transport=httpx.MockTransport(request)) as peer:
         monkeypatch.setattr(SourceReader, "open", lambda self: peer)
         app = create_app(sources=[Source("folder", "Folder", reader=reader), Source("peer", "Peer", url="http://peer")])
-        with TestClient(app) as client:
+        with TestClient(app, base_url="http://127.0.0.1") as client:
             for source in ("folder", "peer"):
                 query = {"run_id": qualify(source, run_id), "name": "debug/output"}
                 assert len(client.get("/api/text-names", params=query).json()) == 2

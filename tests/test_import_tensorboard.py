@@ -68,7 +68,7 @@ def test_standard_dataset_preserves_precision_paths_gaps_and_source(tmp_path):
     assert reader.get_scalar_series(run.run_id, "exact")[0].value == 1.123456789012345
     assert math.isnan(reader.get_scalar_series(run.run_id, "gap")[0].value)
     assert not (output / "runs").exists()
-    with TestClient(create_app(reader, logdir=output)) as client:
+    with TestClient(create_app(reader, logdir=output), base_url="http://127.0.0.1") as client:
         fields = client.get("/api/metrics", params={"run_id": run.run_id}).json()["fields"]
         assert any(field["metric"] == "metrics/Set5/psnr" for field in fields)
         assert client.get("/api/scalars", params={"run_id": run.run_id, "metric": "gap"}).json()["points"][0]["value"] is None
@@ -171,7 +171,7 @@ def test_restart_preserves_metadata_user_edits_and_native_sdk_handoff(tmp_path):
     writer.flush_and_close()
     reader.update_run_tags("experiment", ["reviewed"], ["tensorboard-import"])
     reader.save_run_note("experiment", "Keep this note", 0)
-    with TestClient(create_app(reader, logdir=output)) as client:
+    with TestClient(create_app(reader, logdir=output), base_url="http://127.0.0.1") as client:
         assert client.post("/api/workspace/views", json={"name": "Saved", "state": {}}).status_code == 201
     original_details = reader.get_run_details("experiment")
     append_events(path, [event("loss", 1, step=20)])
@@ -188,7 +188,7 @@ def test_restart_preserves_metadata_user_edits_and_native_sdk_handoff(tmp_path):
     assert reader.get_run_details("experiment").config == {"lr": .01, "batch": 8}
     assert reader.get_run_details("experiment").env == original_details.env
     assert [(step, value) for step, value, _ in points(output)] == [(10, 2), (20, .75), (30, .5)]
-    with TestClient(create_app(reader, logdir=output)) as client:
+    with TestClient(create_app(reader, logdir=output), base_url="http://127.0.0.1") as client:
         assert client.get("/api/workspace").json()["views"][0]["name"] == "Saved"
 
 

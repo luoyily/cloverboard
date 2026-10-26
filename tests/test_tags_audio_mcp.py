@@ -57,7 +57,7 @@ def test_sdk_tags_and_audio_roundtrip_copy_and_media_index(recorded, tmp_path):
 def test_tag_edits_are_incremental_bounded_and_persistent(recorded, tmp_path):
     reader, baseline, _ = recorded
     app = create_app(reader, logdir=tmp_path)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     response = client.patch("/api/run-tags", params={"run_id": baseline}, json={"add": ["human", "baseline"], "remove": ["reviewed"]})
     assert response.json()["tags"] == ["baseline", "human"]
     reader.update_run_tags(baseline, ["sdk-later"], [])
@@ -66,15 +66,15 @@ def test_tag_edits_are_incremental_bounded_and_persistent(recorded, tmp_path):
     assert response.status_code == 422
     assert len(next(run for run in SqliteStorageReader(tmp_path).list_runs() if run.run_id == baseline).tags) == 3
     assert client.patch("/api/run-tags", params={"run_id": baseline}, json={"add": ["   "]}).status_code == 422
-    local = TestClient(create_app(reader, sources=[Source("folder", "Folder", reader=reader)]))
+    local = TestClient(create_app(reader, sources=[Source("folder", "Folder", reader=reader)]), base_url="http://127.0.0.1")
     assert local.patch("/api/run-tags", params={"run_id": qualify("folder", baseline)}, json={"add": ["local-folder"]}).status_code == 200
-    peer = TestClient(create_app(reader, sources=[Source("peer", "Peer", url="http://127.0.0.1:6010")]))
+    peer = TestClient(create_app(reader, sources=[Source("peer", "Peer", url="http://127.0.0.1:6010")]), base_url="http://127.0.0.1")
     assert peer.patch("/api/run-tags", params={"run_id": qualify("peer", baseline)}, json={"add": ["blocked"]}).status_code == 403
 
 
 def test_audio_http_range_and_path_boundary(recorded, tmp_path):
     reader, baseline, _ = recorded
-    client = TestClient(create_app(reader))
+    client = TestClient(create_app(reader), base_url="http://127.0.0.1")
     page = client.get("/api/audio", params={"run_id": baseline, "name": "validation/audio"}).json()
     query = {"run_id": baseline, "asset_id": page["audio"][0]["audio_id"]}
     full = client.get("/api/asset", params=query)
@@ -97,7 +97,7 @@ def test_audio_peer_proxy_preserves_range_and_auth(recorded, monkeypatch):
     real_client = httpx.AsyncClient
     import cloverboard.server.assets as assets_module
     monkeypatch.setattr(assets_module, "httpx", SimpleNamespace(AsyncClient=lambda **kwargs: real_client(transport=httpx.ASGITransport(leaf), **kwargs)))
-    main = TestClient(create_app(None, sources=[Source("peer", "Peer", url="http://peer", token=leaf.state.access_token)]))
+    main = TestClient(create_app(None, sources=[Source("peer", "Peer", url="http://peer", token=leaf.state.access_token)]), base_url="http://127.0.0.1")
     response = main.get("/api/asset", params={"run_id": qualify("peer", baseline), "asset_id": asset.audio_id}, headers={"Range": "bytes=0-43"})
     assert response.status_code == 206 and len(response.content) == 44
     assert response.content[:4] == b"RIFF" and response.headers["content-type"].startswith("audio/")
@@ -111,7 +111,7 @@ def test_tag_query_and_view_preferences(recorded):
     assert not matches_query(run, RunQuery.model_validate({"rules": [{"field": "tags", "operator": "has_any", "value": ["BASELINE"]}]}))
     with pytest.raises(ValueError):
         RunQuery.model_validate({"rules": [{"field": "config:lr", "operator": "has_all", "value": ["baseline"]}]})
-    client = TestClient(create_app(reader))
+    client = TestClient(create_app(reader), base_url="http://127.0.0.1")
     state = {"panel": "images", "media_type": "audio", "audio_step": 0, "table_decimals": 7, "show_tags_column": True, "tag_filter": ["reviewed"], "selected_ids": [baseline]}
     saved = client.post("/api/workspace/views", json={"name": "Audio review", "state": state}).json()["state"]
     assert all(saved[key] == value for key, value in state.items())

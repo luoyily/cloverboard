@@ -45,7 +45,7 @@ def test_sdk_metric_paths_share_top_level_groups_and_reject_empty_segments(tmp_p
     reader = SqliteStorageReader(tmp_path)
     assert reader.list_metrics(run_id) == ["loss", "metrics/Set5/psnr", "train/acc", "train/loss"]
     assert reader.get_scalar_series(run_id, "metrics/Set5/psnr")[0].value == 32
-    fields = TestClient(create_app(reader)).get("/api/metrics", params={"run_id": run_id}).json()["fields"]
+    fields = TestClient(create_app(reader), base_url="http://127.0.0.1").get("/api/metrics", params={"run_id": run_id}).json()["fields"]
     assert {field["metric"]: (field["group"], field["name"]) for field in fields} == {
         "loss": ("General", "loss"), "train/acc": ("train", "acc"), "train/loss": ("train", "loss"),
         "metrics/Set5/psnr": ("metrics", "Set5/psnr"),
@@ -54,7 +54,7 @@ def test_sdk_metric_paths_share_top_level_groups_and_reject_empty_segments(tmp_p
 
 def test_notes_are_portable_with_run_and_do_not_modify_training_scalars(tmp_path):
     writer, reader = database(tmp_path)
-    client = TestClient(create_app(reader, logdir=tmp_path))
+    client = TestClient(create_app(reader, logdir=tmp_path), base_url="http://127.0.0.1")
     empty = client.get("/api/run-notes?run_id=example").json()
     assert empty["revision"] == 0 and empty["writable"]
     saved = client.put("/api/run-notes?run_id=example", json={"body": "# Trial\n\n- lower lr", "revision": 0})
@@ -66,7 +66,7 @@ def test_notes_are_portable_with_run_and_do_not_modify_training_scalars(tmp_path
     assert client.get("/api/runs").json()[0]["has_notes"] is True
     assert not (tmp_path / ".workspace").exists()
     assert client.put("/api/run-notes?run_id=example", json={"body": "stale", "revision": 0}).status_code == 409
-    assert TestClient(create_app(SqliteStorageReader(tmp_path))).get("/api/run-notes?run_id=example").json()["body"].startswith("# Trial")
+    assert TestClient(create_app(SqliteStorageReader(tmp_path)), base_url="http://127.0.0.1").get("/api/run-notes?run_id=example").json()["body"].startswith("# Trial")
     assert client.put("/api/run-notes?run_id=example", json={"body": "", "revision": 1}).status_code == 200
     assert client.get("/api/runs").json()[0]["has_notes"] is False
 
@@ -75,7 +75,7 @@ def test_notes_local_sources_writable_peers_and_share_readonly(monkeypatch, tmp_
     writer, reader = database(tmp_path)
     writer.flush_and_close()
     leaf = create_app(reader, logdir=tmp_path, share=True)
-    leaf_client = TestClient(leaf)
+    leaf_client = TestClient(leaf, base_url="http://127.0.0.1")
     real_client = httpx.Client
     def reply(request):
         assert request.url.params["local_only"] == "true"
@@ -84,7 +84,7 @@ def test_notes_local_sources_writable_peers_and_share_readonly(monkeypatch, tmp_
     import cloverboard.server.sources as module
     monkeypatch.setattr(module, "httpx", SimpleNamespace(Client=lambda **kwargs: real_client(transport=httpx.MockTransport(reply), **kwargs), HTTPError=httpx.HTTPError))
     app = create_app(reader, sources=[Source("folder", "Folder", reader=reader), Source("peer", "Peer", url="http://127.0.0.1:6024", token=leaf.state.access_token)])
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     assert client.put("/api/run-notes", params={"run_id": qualify("folder", "example")}, json={"body": "Local", "revision": 0}).status_code == 200
     peer_query = {"run_id": qualify("peer", "example")}
     assert client.get("/api/run-notes", params=peer_query).json()["writable"] is False
@@ -96,7 +96,7 @@ def test_notes_local_sources_writable_peers_and_share_readonly(monkeypatch, tmp_
 
 
 def test_workspace_sqlite_rename_and_new_settings_are_independent(tmp_path):
-    client = TestClient(create_app(logdir=tmp_path))
+    client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
     state = {"selected_ids": ["example"], "y_scale": "log", "chart_scales": {"validation/score": "linear"}, "collapsed_groups": ["optimizer"], "image_timeline_samples": 50, "images_per_step": 4}
     view = client.post("/api/workspace/views", json={"name": "Trial", "state": state}).json()
     client.put("/api/workspace/state", json={"state": {**state, "smoothing": .9}, "saved_at": 20})
@@ -105,20 +105,20 @@ def test_workspace_sqlite_rename_and_new_settings_are_independent(tmp_path):
     assert renamed["state"]["smoothing"] == .6
     client.post("/api/workspace/views", json={"name": "Other", "state": {}})
     assert client.patch(f"/api/workspace/views/{view['view_id']}", json={"name": "other"}).status_code == 409
-    restarted = TestClient(create_app(logdir=tmp_path)).get("/api/workspace").json()
+    restarted = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1").get("/api/workspace").json()
     assert restarted["state"]["smoothing"] == .9
     assert restarted["views"][0]["state"]["collapsed_groups"] == ["optimizer"]
     assert restarted["views"][0]["state"]["image_timeline_samples"] == 50
     files = list((tmp_path / ".workspace").iterdir())
     assert any(path.name == "workspace.sqlite" for path in files)
     assert not any(path.suffix == ".json" for path in files)
-    readonly = TestClient(create_app(logdir=tmp_path, read_only=True))
+    readonly = TestClient(create_app(logdir=tmp_path, read_only=True), base_url="http://127.0.0.1")
     assert readonly.patch(f"/api/workspace/views/{view['view_id']}", json={"name": "no"}).status_code == 403
 
 
 @pytest.mark.parametrize("content", ["bad json", '{"version": 1, "seed": "x", "slots": {"a": -1}}', '{"version": 1, "seed": "x", "slots": {"a": 1, "b": 1}}'])
 def test_corrupt_color_rows_do_not_break_runs(tmp_path, content):
-    client = TestClient(create_app(logdir=tmp_path))
+    client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
     client.put("/api/workspace/colors", json={"keys": ["run"]})
     with sqlite3.connect(tmp_path / ".workspace" / "workspace.sqlite") as connection:
         connection.execute("UPDATE color_registry SET payload=?", (content,))
@@ -127,7 +127,7 @@ def test_corrupt_color_rows_do_not_break_runs(tmp_path, content):
 
 
 def test_corrupt_workspace_state_can_be_replaced_and_bad_database_reports_unavailable(tmp_path):
-    client = TestClient(create_app(logdir=tmp_path))
+    client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
     client.put("/api/workspace/state", json={"state": {}, "saved_at": 20})
     path = tmp_path / ".workspace" / "workspace.sqlite"
     with sqlite3.connect(path) as connection:
@@ -138,7 +138,7 @@ def test_corrupt_workspace_state_can_be_replaced_and_bad_database_reports_unavai
     other = tmp_path / "damaged"
     (other / ".workspace").mkdir(parents=True)
     (other / ".workspace" / "workspace.sqlite").write_bytes(b"invalid database")
-    damaged = TestClient(create_app(logdir=other))
+    damaged = TestClient(create_app(logdir=other), base_url="http://127.0.0.1")
     assert damaged.get("/api/workspace").status_code == 503
     assert damaged.put("/api/workspace/state", json={"state": {}, "saved_at": 40}).status_code == 503
 
@@ -150,7 +150,7 @@ def test_image_sampling_and_pages_bound_large_histories_without_losing_steps(tmp
             (f"{index:032x}", "prediction", index // 20, index, f"media/{index}.png", 10, 10, "png", "") for index in range(20_000)
         ])
     writer.flush_and_close()
-    client = TestClient(create_app(reader, logdir=tmp_path))
+    client = TestClient(create_app(reader, logdir=tmp_path), base_url="http://127.0.0.1")
     query = {"run_id": "example", "name": "prediction"}
     names = client.get("/api/image-names", params={"run_id": "example"}).json()
     assert names[0]["count"] == 20_000 and names[0]["step_count"] == 1000
@@ -180,7 +180,7 @@ def test_thumbnail_is_small_memory_bounded_and_readonly(tmp_path):
     writer.append_image(ImageRecord(image_id, "large", 0, 1, "media/large.png", 3000, 2000, "png"))
     writer.flush_and_close()
     before = path.read_bytes()
-    client = TestClient(create_app(reader, logdir=tmp_path, read_only=True))
+    client = TestClient(create_app(reader, logdir=tmp_path, read_only=True), base_url="http://127.0.0.1")
     preview = client.get("/api/asset", params={"run_id": "example", "asset_id": image_id, "thumbnail": True})
     assert preview.status_code == 200
     with Image.open(BytesIO(preview.content)) as image:
@@ -235,7 +235,7 @@ def test_thumbnail_http_cache_validation_and_share_auth(tmp_path, monkeypatch):
     writer.append_image(ImageRecord(image_id, "image", 0, 1, "media/image.png", 800, 600, "png", ""))
     writer.flush_and_close()
     query = {"run_id": "example", "asset_id": image_id, "thumbnail": True}
-    client = TestClient(create_app(reader))
+    client = TestClient(create_app(reader), base_url="http://127.0.0.1")
     first = client.get("/api/asset", params=query)
     assert first.status_code == 200 and first.headers["cache-control"] == "private, max-age=3600"
     etag = first.headers["etag"]
@@ -243,7 +243,7 @@ def test_thumbnail_http_cache_validation_and_share_auth(tmp_path, monkeypatch):
     assert unchanged.status_code == 304 and unchanged.content == b""
 
     leaf = create_app(reader, share=True)
-    share = TestClient(leaf)
+    share = TestClient(leaf, base_url="http://127.0.0.1")
     assert share.get("/api/asset", params=query, headers={"If-None-Match": etag}).status_code == 401
     headers = {"Authorization": f"Bearer {leaf.state.access_token}", "If-None-Match": etag}
     assert share.get("/api/asset", params=query, headers=headers).headers["cache-control"] == "no-store"
@@ -251,7 +251,7 @@ def test_thumbnail_http_cache_validation_and_share_auth(tmp_path, monkeypatch):
     import cloverboard.server.assets as assets
     real_client = httpx.AsyncClient
     monkeypatch.setattr(assets, "httpx", SimpleNamespace(AsyncClient=lambda **kwargs: real_client(transport=httpx.ASGITransport(leaf), **kwargs)))
-    peer = TestClient(create_app(sources=[Source("peer", "Peer", url="http://peer", token=leaf.state.access_token)]))
+    peer = TestClient(create_app(sources=[Source("peer", "Peer", url="http://peer", token=leaf.state.access_token)]), base_url="http://127.0.0.1")
     response = peer.get("/api/asset", params={**query, "run_id": qualify("peer", "example")}, headers={"If-None-Match": etag})
     assert response.status_code == 304 and response.headers["etag"] == etag
     assert response.headers["cache-control"] == "no-store"
@@ -264,9 +264,9 @@ def test_positive_bounds_and_share_tokens(tmp_path):
     bounds = reader.get_scalar_bounds("example", "loss")
     assert (bounds.minimum, bounds.positive_minimum, bounds.maximum) == (-4, .001, 10)
     app = create_app(reader, logdir=tmp_path, share=True)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     assert client.get("/api/share-token").status_code == 401
     response = client.get("/api/share-token", headers={"Authorization": f"Bearer {app.state.access_token}"})
     assert response.json()["token"] == app.state.access_token
     assert response.headers["cache-control"] == "no-store"
-    assert TestClient(create_app(reader)).get("/api/share-token").json()["token"] is None
+    assert TestClient(create_app(reader), base_url="http://127.0.0.1").get("/api/share-token").json()["token"] is None

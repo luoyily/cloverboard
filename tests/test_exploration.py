@@ -42,7 +42,7 @@ def test_zoom_reads_raw_range_before_downsampling_and_keeps_ema_prefix(tmp_path)
 
 def test_summary_uses_full_raw_history_and_preserves_invalid_latest(tmp_path):
     reader = _history(tmp_path)
-    client = TestClient(create_app(reader, logdir=tmp_path))
+    client = TestClient(create_app(reader, logdir=tmp_path), base_url="http://127.0.0.1")
     summary = client.get("/api/scalar-summary", params={"run_id": "r1", "metric": "loss", "target": 0.2, "direction": "lte"}).json()
     assert summary["latest"]["step"] == 2399
     assert summary["latest"]["value"] is None
@@ -67,7 +67,7 @@ def test_timestamps_keep_actual_samples_and_global_step_zero_origin(tmp_path):
         ScalarRecord("validation", 10, 260, .7),
     ])
     writer.flush_and_close()
-    client = TestClient(create_app(SqliteStorageReader(tmp_path), logdir=tmp_path))
+    client = TestClient(create_app(SqliteStorageReader(tmp_path), logdir=tmp_path), base_url="http://127.0.0.1")
     run = client.get("/api/runs").json()[0]
     assert run["time_origin"] == 100
     assert run["time_origin_kind"] == "step_zero"
@@ -94,7 +94,7 @@ def test_warmup_bounds_use_all_raw_data_and_do_not_change_summaries(tmp_path):
     assert reader.get_scalar_bounds("r1", "loss", 1240, 1250).maximum == 1
     assert reader.get_scalar_bounds("r1", "loss", 1900, 1900).minimum is None
     assert reader.get_scalar_bounds("r1", "loss", 3000).maximum is None
-    client = TestClient(create_app(reader, logdir=tmp_path, read_only=True))
+    client = TestClient(create_app(reader, logdir=tmp_path, read_only=True), base_url="http://127.0.0.1")
     query = {"run_id": "r1", "metric": "loss"}
     assert client.get("/api/scalar-bounds", params={**query, "step_min": 1240, "step_max": 1250}).json() == {"minimum": .19, "maximum": 1, "positive_minimum": .19}
     assert client.get("/api/scalar-bounds", params={**query, "step_min": 20, "step_max": 10}).status_code == 422
@@ -104,7 +104,7 @@ def test_warmup_bounds_use_all_raw_data_and_do_not_change_summaries(tmp_path):
 
 
 def test_range_and_summary_validation_and_readonly(tmp_path):
-    client = TestClient(create_app(_history(tmp_path), logdir=tmp_path, read_only=True))
+    client = TestClient(create_app(_history(tmp_path), logdir=tmp_path, read_only=True), base_url="http://127.0.0.1")
     query = {"run_id": "r1", "metric": "loss"}
     assert client.get("/api/scalars", params={**query, "step_min": 20, "step_max": 10}).status_code == 422
     assert client.get("/api/scalars", params={**query, "step_min": 1 << 80}).status_code == 422
@@ -116,7 +116,7 @@ def test_range_and_summary_validation_and_readonly(tmp_path):
 
 def test_shared_exploration_reads_require_auth_and_cannot_persist_colors(tmp_path):
     app = create_app(_history(tmp_path), logdir=tmp_path, share=True)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     query = {"run_id": "r1", "metric": "loss", "step_min": 1240, "step_max": 1250}
     assert client.get("/api/scalars", params=query).status_code == 401
     assert client.get("/api/scalar-bounds", params=query).status_code == 401
@@ -130,7 +130,7 @@ def test_shared_exploration_reads_require_auth_and_cannot_persist_colors(tmp_pat
 
 
 def test_colors_append_only_restart_copy_and_readonly(tmp_path):
-    client = TestClient(create_app(logdir=tmp_path))
+    client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
     assert client.get("/api/workspace/colors").status_code == 200
     assert not (tmp_path / ".workspace").exists()
     first = client.put("/api/workspace/colors", json={"keys": ['run:["local","r2"]', 'run:["peer","r2"]']}).json()
@@ -139,25 +139,25 @@ def test_colors_append_only_restart_copy_and_readonly(tmp_path):
     assert len(set(next_colors["slots"].values())) == 3
     path = tmp_path / ".workspace" / "workspace.sqlite"
     before = path.read_bytes()
-    readonly = TestClient(create_app(logdir=tmp_path, read_only=True))
+    readonly = TestClient(create_app(logdir=tmp_path, read_only=True), base_url="http://127.0.0.1")
     assert readonly.get("/api/workspace/colors").json() == next_colors
     assert readonly.put("/api/workspace/colors", json={"keys": ["new"]}).status_code == 403
     assert path.read_bytes() == before
     copied = tmp_path / "copied" / ".workspace"
     copied.mkdir(parents=True)
     (copied / "workspace.sqlite").write_bytes(before)
-    assert TestClient(create_app(logdir=copied.parent)).get("/api/workspace/colors").json() == next_colors
+    assert TestClient(create_app(logdir=copied.parent), base_url="http://127.0.0.1").get("/api/workspace/colors").json() == next_colors
 
 
 def test_empty_color_registry_is_available_without_writes(tmp_path):
-    client = TestClient(create_app(logdir=tmp_path))
+    client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
     assert client.get("/api/workspace/colors").json()["slots"] == {}
     assert client.get("/api/runs").status_code == 200
     assert not (tmp_path / ".workspace").exists()
 
 
 def test_view_list_and_comparison_preferences_roundtrip(tmp_path):
-    client = TestClient(create_app(logdir=tmp_path))
+    client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
     state = {
         "selected_ids": ["r1"], "baseline_id": "r1", "search": "SRx[24]", "search_regex": True, "run_sort": "name_desc",
         "targets": {"loss": {"value": 0.2, "direction": "lte"}},
@@ -167,7 +167,7 @@ def test_view_list_and_comparison_preferences_roundtrip(tmp_path):
     }
     saved = client.post("/api/workspace/views", json={"name": "Low LR", "state": state})
     assert saved.status_code == 201
-    restored = TestClient(create_app(logdir=tmp_path)).get("/api/workspace").json()["views"][0]["state"]
+    restored = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1").get("/api/workspace").json()["views"][0]["state"]
     for key in ("selected_ids", "search", "search_regex", "run_sort"):
         assert restored[key] == state[key]
     assert restored["colors"]["domain"] == [0.0001, 0.1]
@@ -186,7 +186,7 @@ def test_view_list_and_comparison_preferences_roundtrip(tmp_path):
 
 @pytest.mark.parametrize("mode", ["baseline", "target", "both", "hidden"])
 def test_explicit_delta_preferences_survive_workspace_and_view_restore(tmp_path, mode):
-    client = TestClient(create_app(logdir=tmp_path))
+    client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
     state = {
         "tooltip_delta": mode, "refresh_interval": 30, "table_delta": mode,
         "table_show_steps": False,
@@ -194,7 +194,7 @@ def test_explicit_delta_preferences_survive_workspace_and_view_restore(tmp_path,
     }
     assert client.put("/api/workspace/state", json={"state": state, "saved_at": 10}).status_code == 200
     assert client.post("/api/workspace/views", json={"name": "Delta", "state": state}).status_code == 201
-    restored = TestClient(create_app(logdir=tmp_path)).get("/api/workspace").json()
+    restored = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1").get("/api/workspace").json()
     expected = mode
     assert restored["state"]["tooltip_delta"] == expected
     assert restored["views"][0]["state"]["tooltip_delta"] == expected
@@ -212,5 +212,5 @@ def test_explicit_delta_preferences_survive_workspace_and_view_restore(tmp_path,
     {"tooltip_time": "wrong"}, {"tooltip_delta": "wrong"}, {"chart_warmup": {"loss": 1 << 60}},
 ])
 def test_invalid_exploration_state_is_rejected(tmp_path, patch):
-    response = TestClient(create_app(logdir=tmp_path)).put("/api/workspace/state", json={"state": patch, "saved_at": 10})
+    response = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1").put("/api/workspace/state", json={"state": patch, "saved_at": 10})
     assert response.status_code == 422

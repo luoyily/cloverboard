@@ -108,7 +108,7 @@ def test_images_copy_input_keep_same_step_records_and_survive_restart(tmp_path):
     with sqlite3.connect(tmp_path / run_id / "run.sqlite") as connection:
         types = [row[2] for row in connection.execute("PRAGMA table_info(images)")]
         assert "BLOB" not in types
-    client = TestClient(create_app(reader, logdir=tmp_path, read_only=True))
+    client = TestClient(create_app(reader, logdir=tmp_path, read_only=True), base_url="http://127.0.0.1")
     records = client.get("/api/images", params={"run_id": run_id, "name": "validation/prediction"}).json()["images"]
     assert len(records) == 2
     response = client.get("/api/asset", params={"run_id": run_id, "asset_id": first.image_id})
@@ -122,7 +122,7 @@ def test_assets_share_auth_and_reject_index_paths_outside_run(tmp_path):
     reader = SqliteStorageReader(tmp_path)
     image = reader.image_page(run_id, "validation/prediction").images[0]
     app = create_app(reader, logdir=tmp_path, share=True)
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     query = {"run_id": run_id, "asset_id": image.image_id}
     assert client.get("/api/asset", params=query).status_code == 401
     headers = {"Authorization": f"Bearer {app.state.access_token}"}
@@ -137,7 +137,7 @@ def test_one_hop_sources_isolate_same_ids_authenticate_and_keep_offline_identity
     run = RunSummary("same", "Example", 1)
     primary = FakeStorageReader([run], {("same", "loss"): [ScalarPoint(0, .2)]})
     leaf = create_app(primary, share=True, sources=[Source("nested", "Nested", url="http://unreachable.test")])
-    leaf_client = TestClient(leaf)
+    leaf_client = TestClient(leaf, base_url="http://127.0.0.1")
     calls = []
     offline = False
     def reply(request):
@@ -152,7 +152,7 @@ def test_one_hop_sources_isolate_same_ids_authenticate_and_keep_offline_identity
     monkeypatch.setattr(module, "httpx", SimpleNamespace(Client=lambda **kwargs: real_client(transport=httpx.MockTransport(reply), **kwargs), HTTPError=httpx.HTTPError))
     peer = Source("peer", "Other run folder", url="http://127.0.0.1:6022", token=leaf.state.access_token)
     app = create_app(primary, sources=[peer, Source("folder", "Local folder", reader=primary)])
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     runs = client.get("/api/runs").json()
     assert len(runs) == 3
     assert len({run["run_id"] for run in runs}) == 3
@@ -190,10 +190,10 @@ def test_sources_config_supports_loopback_local_dirs_and_stable_keys(tmp_path, m
 
 
 def test_image_view_state_roundtrip(tmp_path):
-    client = TestClient(create_app(logdir=tmp_path))
+    client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
     payload = {"name": "Predictions", "state": {"panel": "images", "image_name": "prediction", "image_step": 0}}
     assert client.post("/api/workspace/views", json=payload).status_code == 201
-    state = TestClient(create_app(logdir=tmp_path)).get("/api/workspace").json()["views"][0]["state"]
+    state = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1").get("/api/workspace").json()["views"][0]["state"]
     assert (state["panel"], state["image_name"], state["image_step"]) == ("images", "prediction", 0)
 
 
