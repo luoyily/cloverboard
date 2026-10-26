@@ -33,6 +33,8 @@ export default function App() {
   const [summaries, setSummaries] = useState<Map<string, ScalarSummary>>(() => new Map());
   const [loadedSummary, setLoadedSummary] = useState("");
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [locateRequest, setLocateRequest] = useState<{ id: string; sequence: number } | null>(null);
+  useEffect(() => { setLocateRequest(null); }, [state.search, state.search_regex, state.tag_filter, state.tag_filter_match]);
   const [appearance, setAppearance] = useState<RunSummary | null>(null);
   const [tagRuns, setTagRuns] = useState<RunSummary[] | null>(null);
   const [baselineUndo, setBaselineUndo] = useState<string | null>(null);
@@ -263,12 +265,12 @@ export default function App() {
   } else if (!metricFields.length && !catalogReady) {
     content = <div className="empty" role="status">Loading metrics…</div>;
   } else {
-    content = <ChartGrid metrics={filteredMetricFields} loadingMetrics={loadingMetrics} refreshTick={refreshTick} runs={selectedRuns} series={series} colors={colors} smoothing={state.smoothing} state={state} summaries={visibleSummaries} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} topIds={topIds} />;
+    content = <ChartGrid metrics={filteredMetricFields} loadingMetrics={loadingMetrics} refreshTick={refreshTick} runs={selectedRuns} series={series} colors={colors} smoothing={state.smoothing} state={state} summaries={visibleSummaries} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onLocateRun={(id) => setLocateRequest((previous) => ({ id, sequence: (previous?.sequence ?? 0) + 1 }))} topIds={topIds} />;
   }
 
   return <div className="app" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
     <RunList runs={orderedRuns} selectedIds={selectedIds} colors={colors} onToggle={toggleRun} onBulkSelect={bulkSelect} onSelectOnly={selectOnly} sidebarWidth={sidebarWidth} onSidebarWidth={setSidebarWidth} filter={state.search} onFilterChange={(search) => update({ search })}
-      state={state} onChange={update} onEditTags={setTagRuns}
+      state={state} onChange={update} onEditTags={setTagRuns} locateRequest={locateRequest}
       baselineId={state.baseline_id} focusedId={focusedId} onFocusRun={setFocusedId} onAppearance={setAppearance} onDetails={openDetails} onBaseline={setBaseline} />
     <div className="workspace">
       <TopBar themeMode={themeMode} onThemeToggle={() => setThemeMode((mode) => nextThemeMode(mode))}

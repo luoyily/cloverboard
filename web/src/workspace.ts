@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { getJson } from "./api";
 import { defaultColors, type Target, type ChartZoom, type ColorSettings, type TimeDisplay, type DeltaDisplay } from "./features";
 import { stableValue } from "./comparison";
+import type { ReadoutPlacement } from "./readout";
 
 export interface WorkspaceState {
   version: 1;
@@ -11,6 +12,7 @@ export interface WorkspaceState {
   run_sort: "started_desc" | "started_asc" | "name_asc" | "name_desc";
   metric_filter: string;
   chart_density: "normal" | "compact";
+  show_chart_legend: boolean;
   table_time: "last_recorded_at" | "started_at" | "hidden";
   table_show_steps: boolean;
   table_delta: DeltaDisplay;
@@ -21,6 +23,7 @@ export interface WorkspaceState {
   table_decimals: number;
   show_tags_column: boolean;
   tooltip_sort: "value" | "list";
+  tooltip_placement: ReadoutPlacement;
   tooltip_time: TimeDisplay;
   tooltip_delta: DeltaDisplay;
   chart_warmup: Record<string, number | null>;
@@ -77,11 +80,13 @@ export function defaultWorkspaceState(): WorkspaceState {
     selected_ids: null,
     search: "", search_regex: false, run_sort: "started_desc", metric_filter: "", chart_density: "normal", table_time: "last_recorded_at",
     tag_filter: [], tag_filter_match: "any",
+    show_chart_legend: true,
     smoothing: 0.6,
     tooltip_decimals: 3,
     table_decimals: 4, show_tags_column: false,
     table_show_steps: true, table_delta: "both",
     tooltip_sort: "value",
+    tooltip_placement: "vertical",
     tooltip_time: "hidden",
     tooltip_delta: "both",
     chart_warmup: {}, y_warmup: null, y_scale: "linear", chart_scales: {}, collapsed_groups: [], expanded_charts: [],
@@ -118,6 +123,7 @@ export function normalizeState(state: Partial<WorkspaceState>): WorkspaceState {
   if (!["started_desc", "started_asc", "name_asc", "name_desc"].includes(next.run_sort)) next.run_sort = "started_desc";
   if (typeof next.metric_filter !== "string") next.metric_filter = "";
   if (!["normal", "compact"].includes(next.chart_density)) next.chart_density = "normal";
+  if (typeof next.show_chart_legend !== "boolean") next.show_chart_legend = true;
   if (!["last_recorded_at", "started_at", "hidden"].includes(next.table_time)) next.table_time = "last_recorded_at";
   const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
   if (!Number.isInteger(next.tooltip_decimals) || next.tooltip_decimals < 0 || next.tooltip_decimals > 8) next.tooltip_decimals = 3;
@@ -133,6 +139,7 @@ export function normalizeState(state: Partial<WorkspaceState>): WorkspaceState {
   if (typeof next.audio_name !== "string") next.audio_name = "";
   if (!Number.isSafeInteger(next.audio_step)) next.audio_step = null;
   if (!["value", "list"].includes(next.tooltip_sort)) next.tooltip_sort = "value";
+  if (!["vertical", "horizontal"].includes(next.tooltip_placement)) next.tooltip_placement = "vertical";
   if (!["hidden", "elapsed", "wall"].includes(next.tooltip_time)) next.tooltip_time = "hidden";
   if (!["baseline", "target", "both", "hidden"].includes(next.tooltip_delta)) next.tooltip_delta = "both";
   next.chart_warmup = Object.fromEntries(Object.entries(state.chart_warmup ?? {}).filter(([, step]) => step === null || Number.isSafeInteger(step)));

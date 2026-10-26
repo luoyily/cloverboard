@@ -192,6 +192,7 @@ class WorkspaceState(BaseModel):
     run_sort: Literal["started_desc", "started_asc", "name_asc", "name_desc"] = "started_desc"
     metric_filter: str = Field(default="", max_length=1000)
     chart_density: Literal["normal", "compact"] = "normal"
+    show_chart_legend: bool = True
     tag_filter: list[str] = Field(default_factory=list, max_length=64)
     tag_filter_match: Literal["any", "all", "none", "empty"] = "any"
     smoothing: float = Field(default=0.6, ge=0, le=0.95, allow_inf_nan=False)
@@ -202,6 +203,7 @@ class WorkspaceState(BaseModel):
     table_show_steps: bool = True
     table_delta: Literal["baseline", "target", "both", "hidden"] = "both"
     tooltip_sort: Literal["value", "list"] = "value"
+    tooltip_placement: Literal["vertical", "horizontal"] = "vertical"
     tooltip_time: Literal["hidden", "elapsed", "wall"] = "hidden"
     tooltip_delta: Literal["baseline", "target", "both", "hidden"] = "both"
     chart_warmup: dict[str, int | None] = Field(default_factory=dict)

@@ -93,11 +93,13 @@ export default function TopBar({
         {state.panel === "charts" ? <ChartToolbar
           metricFilter={state.metric_filter} onMetricFilterChange={(metric_filter) => onChange({ metric_filter })}
           density={state.chart_density} onDensityChange={(chart_density) => onChange({ chart_density })}
+          showLegend={state.show_chart_legend} onShowLegendChange={(show_chart_legend) => onChange({ show_chart_legend })}
           yScale={state.y_scale} onYScaleChange={(y_scale) => onChange({ y_scale, chart_zoom: clearYZoom(state.chart_zoom, (metric) => !state.chart_scales[metric]) })}
           warmup={state.y_warmup} onWarmupChange={(y_warmup) => onChange({ y_warmup, chart_zoom: clearYZoom(state.chart_zoom, (metric) => !Object.hasOwn(state.chart_warmup, metric)) })}
           smoothing={state.smoothing} onSmoothingChange={(value) => onChange({ smoothing: value })}
           tooltipDecimals={state.tooltip_decimals} onTooltipDecimalsChange={(value) => onChange({ tooltip_decimals: value })}
           tooltipSort={state.tooltip_sort} onTooltipSortChange={(value) => onChange({ tooltip_sort: value })}
+          tooltipPlacement={state.tooltip_placement} onTooltipPlacementChange={(tooltip_placement) => onChange({ tooltip_placement })}
           timeDisplay={state.tooltip_time} onTimeDisplayChange={(value) => onChange({ tooltip_time: value })}
           deltaDisplay={state.tooltip_delta} onDeltaDisplayChange={(value) => onChange({ tooltip_delta: value })}
         /> : state.panel === "table" ? compareControls : <ImageSettings state={state} onChange={onChange} />}

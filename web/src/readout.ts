@@ -1,17 +1,24 @@
 import type { RunSummary, ScalarPoint } from "./api";
 
 export interface ReadoutAnchor { left: number; right: number; top: number; bottom: number }
-export function placeReadout(anchor: ReadoutAnchor, popup: { width: number; height: number }, viewport: { width: number; height: number }) {
+export type ReadoutPlacement = "vertical" | "horizontal";
+export function placeReadout(anchor: ReadoutAnchor, popup: { width: number; height: number }, viewport: { width: number; height: number }, preference: ReadoutPlacement = "vertical") {
   const gap = 12, maxWidth = Math.max(0, viewport.width - gap * 2), maxHeight = Math.max(0, viewport.height - gap * 2);
   const width = Math.min(popup.width, maxWidth), height = Math.min(popup.height, maxHeight);
   const top = Math.max(gap, Math.min(anchor.top, viewport.height - height - gap));
   if (viewport.width <= 600) return { left: gap, top: viewport.height - height - gap, maxWidth, maxHeight, docked: true };
-  if (anchor.right + gap + width <= viewport.width - gap) return { left: anchor.right + gap, top, maxWidth, maxHeight, docked: false };
-  if (anchor.left - gap - width >= gap) return { left: anchor.left - gap - width, top, maxWidth, maxHeight, docked: false };
   const left = Math.max(gap, Math.min(anchor.left, viewport.width - width - gap));
   const below = viewport.height - anchor.bottom - gap * 2, above = anchor.top - gap * 2;
-  if (below >= height) return { left, top: anchor.bottom + gap, maxWidth, maxHeight: below, docked: false };
-  if (above >= height) return { left, top: anchor.top - gap - height, maxWidth, maxHeight: above, docked: false };
+  const vertical = [
+    below >= height ? { left, top: anchor.bottom + gap, maxWidth, maxHeight: below, docked: false } : null,
+    above >= height ? { left, top: anchor.top - gap - height, maxWidth, maxHeight: above, docked: false } : null,
+  ];
+  const horizontal = [
+    anchor.right + gap + width <= viewport.width - gap ? { left: anchor.right + gap, top, maxWidth, maxHeight, docked: false } : null,
+    anchor.left - gap - width >= gap ? { left: anchor.left - gap - width, top, maxWidth, maxHeight, docked: false } : null,
+  ];
+  const fitting = (preference === "vertical" ? [...vertical, ...horizontal] : [...horizontal, ...vertical]).find((candidate) => candidate !== null);
+  if (fitting) return fitting;
   if (Math.max(above, below) >= 80) return below >= above
     ? { left, top: anchor.bottom + gap, maxWidth, maxHeight: below, docked: false }
     : { left, top: gap, maxWidth, maxHeight: above, docked: false };

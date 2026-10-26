@@ -108,6 +108,26 @@ def test_reading_fresh_workspace_does_not_create_database(tmp_path):
     assert not (tmp_path / ".workspace").exists()
 
 
+def test_chart_legend_and_hover_placement_roundtrip_and_legacy_defaults(tmp_path):
+    client = _client(tmp_path)
+    # Existing states and Views have neither field.
+    assert _save(client, {}).status_code == 200
+    legacy = client.post("/api/workspace/views", json={"name": "Legacy", "state": {}})
+    assert legacy.status_code == 201
+    state = {"show_chart_legend": False, "tooltip_placement": "horizontal"}
+    assert _save(client, state, 200).status_code == 200
+    view = client.post("/api/workspace/views", json={"name": "Charts", "state": state})
+    assert view.status_code == 201
+    snapshot = _client(tmp_path).get("/api/workspace").json()
+    saved_views = {value["name"]: value["state"] for value in snapshot["views"]}
+    for value in [snapshot["state"], saved_views["Charts"]]:
+        assert value["show_chart_legend"] is False
+        assert value["tooltip_placement"] == "horizontal"
+    assert saved_views["Legacy"]["show_chart_legend"] is True
+    assert saved_views["Legacy"]["tooltip_placement"] == "vertical"
+    assert _save(client, {"tooltip_placement": "other"}, 300).status_code == 422
+
+
 def test_global_warmup_and_explicit_chart_auto_survive_workspace_and_view_roundtrip(tmp_path):
     client = _client(tmp_path)
     state = {"y_warmup": 1000, "chart_warmup": {"auto": None, "zero": 0, "own": -10}}

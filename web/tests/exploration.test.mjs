@@ -148,17 +148,56 @@ test("local zoom retains edge samples and gaps without extending the recorded ra
   assert.equal((path.match(/M/g) ?? []).length, 2);
 });
 
-test("readouts avoid the active desktop chart and stay inside narrow viewports", () => {
+test("readouts prefer vertical space by default and retain horizontal preference", () => {
   const anchor = { left: 220, right: 620, top: 100, bottom: 380 };
   const popup = { width: 450, height: 180 };
-  const right = readout.placeReadout(anchor, popup, { width: 1200, height: 800 });
-  assert.ok(right.left > anchor.right);
-  const left = readout.placeReadout({ ...anchor, left: 700, right: 1100 }, popup, { width: 1200, height: 800 });
-  assert.ok(left.left + popup.width < 700);
-  const below = readout.placeReadout({ ...anchor, left: 12, right: 1188 }, popup, { width: 1200, height: 800 });
+  const below = readout.placeReadout(anchor, popup, { width: 1200, height: 800 });
   assert.ok(below.top > anchor.bottom);
-  const mobile = readout.placeReadout(anchor, popup, { width: 320, height: 720 });
-  assert.ok(mobile.docked && mobile.left >= 0 && mobile.left + mobile.maxWidth <= 320);
+  const right = readout.placeReadout(anchor, popup, { width: 1200, height: 800 }, "horizontal");
+  assert.ok(right.left > anchor.right);
+  const left = readout.placeReadout({ ...anchor, left: 700, right: 1100 }, popup, { width: 1200, height: 800 }, "horizontal");
+  assert.ok(left.left + popup.width < 700);
+});
+
+test("readouts fall back above, across orientations, and within viewport bounds", () => {
+  const popup = { width: 450, height: 180 }, viewport = { width: 1200, height: 800 };
+  const low = { left: 220, right: 620, top: 500, bottom: 780 };
+  const above = readout.placeReadout(low, popup, viewport);
+  assert.ok(above.top + popup.height < low.top);
+  const tall = { left: 220, right: 620, top: 20, bottom: 780 };
+  assert.ok(readout.placeReadout(tall, popup, viewport).left > tall.right);
+  const wide = { left: 12, right: 1188, top: 100, bottom: 380 };
+  assert.ok(readout.placeReadout(wide, popup, viewport, "horizontal").top > wide.bottom);
+  const cramped = { left: 12, right: 1188, top: 150, bottom: 700 };
+  const limited = readout.placeReadout(cramped, popup, viewport);
+  assert.ok(limited.maxHeight >= 80 && limited.maxHeight < popup.height);
+  assert.ok(limited.top >= 12 && limited.top + limited.maxHeight <= viewport.height - 12);
+  const full = readout.placeReadout({ left: 12, right: 1188, top: 20, bottom: 780 }, popup, viewport);
+  assert.equal(full.docked, true);
+  for (const preference of ["vertical", "horizontal"]) {
+    const mobile = readout.placeReadout(wide, popup, { width: 320, height: 720 }, preference);
+    assert.ok(mobile.docked && mobile.left >= 0 && mobile.left + mobile.maxWidth <= 320);
+  }
+});
+
+test("chart legend and hover placement settings support defaults and shared state", () => {
+  const defaults = normalizeState({});
+  assert.equal(defaults.show_chart_legend, true);
+  assert.equal(defaults.tooltip_placement, "vertical");
+  const invalid = normalizeState({ show_chart_legend: null, tooltip_placement: "other" });
+  assert.equal(invalid.show_chart_legend, true);
+  assert.equal(invalid.tooltip_placement, "vertical");
+  const state = normalizeState({ show_chart_legend: false, tooltip_placement: "horizontal" });
+  const restored = readSharedLocation(`http://localhost/#state=${encodeSharedState(state)}`).state;
+  assert.equal(restored.show_chart_legend, false);
+  assert.equal(restored.tooltip_placement, "horizontal");
+  assert.notEqual(viewStateKey(state), viewStateKey(defaults));
+  const old = { ...defaultWorkspaceState() };
+  delete old.show_chart_legend;
+  delete old.tooltip_placement;
+  const legacy = readSharedLocation(`http://localhost/#state=${Buffer.from(JSON.stringify({ version: 1, state: old })).toString("base64url")}`).state;
+  assert.equal(legacy.show_chart_legend, true);
+  assert.equal(legacy.tooltip_placement, "vertical");
 });
 
 test("fast media results publish before a slow peer finishes", async () => {

@@ -6,11 +6,12 @@ import { baselineDelta, deltaColumns, targetDelta, targetMet, type ChartZoom, ty
 import { formatMetric, runLabel } from "../comparison";
 import { buildPath, compareReadouts, fittedDomain, logTicks, nearestPoint, stepAxis, visiblePoints } from "../chartMath";
 import MetricMenu from "./MetricMenu";
-import { elapsedTime, formatDuration, formatWallTime, timeOriginLabel } from "../readout";
+import { elapsedTime, formatDuration, formatWallTime, timeOriginLabel, type ReadoutPlacement } from "../readout";
 import { useSettledDomain, useWarmupRange } from "../useChartRange";
 import FloatingReadout from "./FloatingReadout";
+import ChartLegend from "./ChartLegend";
 
-const HEIGHT = 240, TOP = 15, BOTTOM = 38, RIGHT = 18;
+const HEIGHT = 224, TOP = 15, BOTTOM = 22, RIGHT = 18;
 
 function formatReadout(value: number | null | undefined, decimals: number): string {
   if (value == null || !Number.isFinite(value)) return "—";
@@ -33,6 +34,9 @@ interface MetricChartProps {
   metric: string; title: string; yScale: "linear" | "log"; scaleOverride?: "linear" | "log"; onScale: (scale: "linear" | "log" | null) => void; runs: RunSummary[]; series: Map<string, ScalarPoint[]>; colors: Map<string, string>; smoothing: number;
   tooltipDecimals: number;
   tooltipSort: "value" | "list";
+  tooltipPlacement: ReadoutPlacement;
+  showLegend: boolean;
+  onLocateRun: (id: string) => void;
   timeDisplay: TimeDisplay; deltaDisplay: DeltaDisplay;
   warmupStep?: number; warmupOverride?: number | null; globalWarmup: number | null; onWarmup: (step: number | null | undefined) => void;
   summaries: Map<string, ScalarSummary>; target?: Target; baselineId: string | null; zoom?: ChartZoom;
@@ -40,7 +44,7 @@ interface MetricChartProps {
   focusedId: string | null; onFocusRun: (id: string | null) => void; topIds: Set<string> | null;
 }
 
-export default function MetricChart({ metric, title, loading, refreshTick, expanded, onExpand, yScale, scaleOverride, onScale, runs, series, colors, smoothing, tooltipDecimals, tooltipSort, timeDisplay, deltaDisplay, warmupStep, warmupOverride, globalWarmup, onWarmup, summaries, target, baselineId, zoom, onZoom, focusedId, onFocusRun, topIds }: MetricChartProps) {
+export default function MetricChart({ metric, title, loading, refreshTick, expanded, onExpand, yScale, scaleOverride, onScale, runs, series, colors, smoothing, tooltipDecimals, tooltipSort, tooltipPlacement, showLegend, onLocateRun, timeDisplay, deltaDisplay, warmupStep, warmupOverride, globalWarmup, onWarmup, summaries, target, baselineId, zoom, onZoom, focusedId, onFocusRun, topIds }: MetricChartProps) {
   const containerRef = useRef<HTMLDivElement>(null), clipId = useId(), helpId = useId();
   const cardRef = useRef<HTMLElement>(null);
   const [width, setWidth] = useState(320);
@@ -173,7 +177,6 @@ export default function MetricChart({ metric, title, loading, refreshTick, expan
             <line className="axis-line" x1={x(tick.step)} x2={x(tick.step)} y1={plotHeight} y2={plotHeight + 4} />
             <text className="axis-text" x={x(tick.step)} y={plotHeight + 17} textAnchor={tick.anchor}>{tick.label}</text>
           </g>)}
-          <text className="axis-text axis-label" x={plotWidth / 2} y={plotHeight + 34} textAnchor="middle">Step</text>
           <g clipPath={`url(#${clipId}-series)`}>
             {[...paths].sort((a, b) => Number(a.run.run_id === focusedId) - Number(b.run.run_id === focusedId)).map((entry) => {
               const isFocused = entry.run.run_id === focusedId;
@@ -194,7 +197,7 @@ export default function MetricChart({ metric, title, loading, refreshTick, expan
           {!hasData && <text className="axis-text" x={plotWidth / 2} y={plotHeight / 2} textAnchor="middle">{loading ? "Loading samples…" : points.length ? logarithmic ? "No positive values in this range" : "No finite values in this range" : "No samples in this range"}</text>}
         </g>
       </svg>
-      {hoverStep !== null && !box && hasData && <FloatingReadout anchor={cardRef.current} pinned={pinned} onDismiss={dismissReadout}>
+      {hoverStep !== null && !box && hasData && <FloatingReadout anchor={cardRef.current} pinned={pinned} preference={tooltipPlacement} onDismiss={dismissReadout}>
         <div className="tooltip-heading" title={pinned ? "Pinned samples" : "Click chart to pin"}>
           <span className="tooltip-context">Samples</span>
           <span className="tooltip-baseline" title={baseline ? `Baseline: ${runLabel(baseline.run)}` : undefined}>{baseline ? `vs ${runLabel(baseline.run)}` : pinned ? "Pinned" : "Click to pin"}</span>
@@ -222,5 +225,6 @@ export default function MetricChart({ metric, title, loading, refreshTick, expan
         {detail && <div className="tooltip-detail"><strong>{runLabel(detail.run)} · Step {detail.point?.step ?? "—"}</strong><span>{formatWallTime(detail.point?.wall_time, true)}</span><span>{timeOriginLabel(detail.run)} · {formatDuration(elapsedTime(detail.point, detail.run))} · includes pauses</span></div>}
       </FloatingReadout>}
     </div>
+    {showLegend && <ChartLegend runs={entries.filter((entry) => entry.points.length > 0).map((entry) => entry.run)} colors={colors} width={width} baselineId={baselineId} focusedId={focusedId} onFocusRun={onFocusRun} onLocateRun={onLocateRun} />}
   </article>;
 }

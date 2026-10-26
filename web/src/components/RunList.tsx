@@ -1,6 +1,6 @@
 import { ArrowDownIcon, ArrowUpIcon, CloverIcon, MagnifyingGlassIcon, DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunSummary } from "../api";
-import { useEffect, useId, useMemo, useRef, type MouseEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from "react";
 import RunActions from "./RunActions";
 import { matchesTagFilter } from "../features";
 import type { WorkspaceState } from "../workspace";
@@ -26,6 +26,7 @@ interface RunListProps {
   baselineId: string | null;
   focusedId: string | null;
   onFocusRun: (id: string | null) => void;
+  locateRequest: { id: string; sequence: number } | null;
   onAppearance: (run: RunSummary) => void;
   onDetails: (run: RunSummary, tab: "overview" | "notes") => void;
   onBaseline: (id: string | null) => void;
@@ -39,9 +40,24 @@ export default function RunList({
   onBulkSelect, onSelectOnly, sidebarWidth, onSidebarWidth,
   filter,
   onFilterChange,
-  baselineId, focusedId, onFocusRun, onAppearance, onDetails, onBaseline, state, onChange, onEditTags,
+  baselineId, focusedId, onFocusRun, locateRequest, onAppearance, onDetails, onBaseline, state, onChange, onEditTags,
 }: RunListProps) {
   const checkboxPrefix = useId();
+  const listRef = useRef<HTMLUListElement>(null);
+  const rows = useRef(new Map<string, HTMLDivElement>());
+  const [locatedId, setLocatedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!locateRequest) { setLocatedId(null); return; }
+    const row = rows.current.get(locateRequest.id), list = listRef.current;
+    if (!row || !list) return;
+    const bounds = row.getBoundingClientRect(), viewport = list.getBoundingClientRect();
+    // Scroll only the run list, leaving the chart and page in place.
+    if (bounds.top < viewport.top) list.scrollTop += bounds.top - viewport.top;
+    else if (bounds.bottom > viewport.bottom) list.scrollTop += bounds.bottom - viewport.bottom;
+    setLocatedId(locateRequest.id);
+    const timer = window.setTimeout(() => setLocatedId(null), 1500);
+    return () => window.clearTimeout(timer);
+  }, [locateRequest]);
   const drag = useRef<{ x: number; width: number } | null>(null);
   const resize = (value: number) => onSidebarWidth(Math.round(Math.max(220, Math.min(value, 600, window.innerWidth * .45))));
   const search = useMemo(() => createRunSearch(filter, state.search_regex), [filter, state.search_regex]);
@@ -49,6 +65,7 @@ export default function RunList({
   useEffect(() => { if (!search.error) lastValidSearch.current = search; }, [search]);
   const activeSearch = search.error ? lastValidSearch.current : search;
   const visibleRuns = runs.filter((run) => {
+    if (run.run_id === locateRequest?.id) return true;
     if (!matchesTagFilter(run, state.tag_filter, state.tag_filter_match)) return false;
     return activeSearch.matches(run);
   });
@@ -116,12 +133,12 @@ export default function RunList({
             <button className="menu-item" disabled={!selectedRuns.length} onClick={(event) => menuAction(event, () => onEditTags(selectedRuns))}>Edit tags for selection…</button>
           </Popover>
         </div>
-        <ul className="run-list">
+        <ul className="run-list" ref={listRef}>
           {visibleRuns.map((run) => {
             const selected = selectedIds.has(run.run_id);
             return (
               <li key={run.run_id}>
-                <div className={`run-item${selected ? " selected" : ""}${focusedId === run.run_id ? " run-focused" : ""}`} onClick={(event) => { if (event.target instanceof Element && !event.target.closest("button,input,label,details")) onToggle(run.run_id); }} onPointerEnter={() => onFocusRun(run.run_id)} onPointerLeave={() => onFocusRun(null)} onFocus={() => onFocusRun(run.run_id)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) onFocusRun(null); }}>
+                <div ref={(element) => { if (element) rows.current.set(run.run_id, element); else rows.current.delete(run.run_id); }} className={`run-item${selected ? " selected" : ""}${focusedId === run.run_id || locatedId === run.run_id ? " run-focused" : ""}${locatedId === run.run_id ? " run-located" : ""}`} onClick={(event) => { if (event.target instanceof Element && !event.target.closest("button,input,label,details")) onToggle(run.run_id); }} onPointerEnter={() => onFocusRun(run.run_id)} onPointerLeave={() => onFocusRun(null)} onFocus={() => onFocusRun(run.run_id)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) onFocusRun(null); }}>
                   <label className="run-checkbox">
                     <Checkbox
                       id={`${checkboxPrefix}-${run.run_id}`}

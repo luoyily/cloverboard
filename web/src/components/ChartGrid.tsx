@@ -17,10 +17,11 @@ interface ChartGridProps {
   onChange: (patch: Partial<WorkspaceState>) => void;
   focusedId: string | null;
   onFocusRun: (id: string | null) => void;
+  onLocateRun: (id: string) => void;
   topIds: Set<string> | null;
 }
 
-export default function ChartGrid({ metrics, loadingMetrics, refreshTick, runs, series, colors, smoothing, state, summaries, onChange, focusedId, onFocusRun, topIds }: ChartGridProps) {
+export default function ChartGrid({ metrics, loadingMetrics, refreshTick, runs, series, colors, smoothing, state, summaries, onChange, focusedId, onFocusRun, onLocateRun, topIds }: ChartGridProps) {
   if (!metrics.length) return <div className="empty">{state.metric_filter ? "No metrics match this filter." : "No metrics in the selected runs."}</div>;
   const groups = new Map<string, MetricField[]>();
   for (const field of metrics) groups.set(field.group, [...groups.get(field.group) ?? [], field]);
@@ -42,6 +43,7 @@ export default function ChartGrid({ metrics, loadingMetrics, refreshTick, runs, 
             onChange({ chart_scales, chart_zoom });
           }}
           tooltipDecimals={state.tooltip_decimals} tooltipSort={state.tooltip_sort} timeDisplay={state.tooltip_time} deltaDisplay={state.tooltip_delta}
+          showLegend={state.show_chart_legend} tooltipPlacement={state.tooltip_placement} onLocateRun={onLocateRun}
           warmupStep={effectiveWarmup(state.chart_warmup[metric], state.y_warmup)} warmupOverride={state.chart_warmup[metric]} globalWarmup={state.y_warmup}
           onWarmup={(step) => {
             const chart_warmup = { ...state.chart_warmup };
