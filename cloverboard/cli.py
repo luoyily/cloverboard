@@ -10,7 +10,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve = subparsers.add_parser("serve", help="start the web UI")
     serve.add_argument("--logdir", default="./runs", help="directory holding run folders")
     serve.add_argument("--host", default="127.0.0.1")
-    serve.add_argument("--port", type=int, default=6006)
+    serve.add_argument("--port", type=int, default=7230)
     serve.add_argument("--read-only", action="store_true", help="reject all write requests")
     serve.add_argument(
         "--share",

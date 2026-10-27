@@ -13,7 +13,7 @@
 
 ```sh
 python -m pip install ./dist/cloverboard-0.1.0-py3-none-any.whl
-cloverboard serve --logdir ./runs --port 6006
+cloverboard serve --logdir ./runs
 ```
 
 从当前仓库进行开发时，还需要 Node.js 20.19+ 或 22.12+：
@@ -22,7 +22,7 @@ cloverboard serve --logdir ./runs --port 6006
 python -m pip install -e ".[dev]"
 npm ci --prefix web
 npm run build --prefix web
-cloverboard serve --logdir ./runs --port 6006
+cloverboard serve --logdir ./runs
 ```
 
 UI 和只读 MCP Streamable HTTP 端点（`/mcp`）会一起启动。
@@ -152,7 +152,7 @@ Audio 接受 `[-1, 1]` 范围内的 float NumPy 数组、int16 数组或 PCM16 W
 将支持 Streamable HTTP 的 MCP 客户端指向：
 
 ```text
-http://127.0.0.1:6006/mcp
+http://127.0.0.1:7230/mcp
 ```
 
 不需要第二个进程，也不需要 MCP 专用启动命令。使用 `--share` 时，在

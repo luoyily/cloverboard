@@ -8,7 +8,7 @@ def test_serve_defaults():
 
     assert args.logdir == "./runs"
     assert args.host == "127.0.0.1"
-    assert args.port == 6006
+    assert args.port == 7230
     assert args.read_only is False
     assert args.share is False
     assert args.peers == ""

@@ -10,7 +10,7 @@ Requires Python 3.11+. A built wheel includes the WebUI and needs no Node.js:
 
 ```sh
 python -m pip install ./dist/cloverboard-0.1.0-py3-none-any.whl
-cloverboard serve --logdir ./runs --port 6006
+cloverboard serve --logdir ./runs
 ```
 
 For development from this checkout, also install Node.js 20.19+ or 22.12+:
@@ -19,7 +19,7 @@ For development from this checkout, also install Node.js 20.19+ or 22.12+:
 python -m pip install -e ".[dev]"
 npm ci --prefix web
 npm run build --prefix web
-cloverboard serve --logdir ./runs --port 6006
+cloverboard serve --logdir ./runs
 ```
 
 The UI and read-only MCP Streamable HTTP endpoint (`/mcp`) start together.
@@ -168,7 +168,7 @@ the queue; forcibly killing a process can lose pending records.
 Point an MCP client supporting Streamable HTTP at:
 
 ```text
-http://127.0.0.1:6006/mcp
+http://127.0.0.1:7230/mcp
 ```
 
 No second process or MCP-specific launch command is required. For `--share`,
