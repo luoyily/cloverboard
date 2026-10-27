@@ -39,6 +39,7 @@ events.out.tfevents.*
 .env
 .env.*
 !.env.example
+.zcode/
 
 # Operating system metadata
 .DS_Store

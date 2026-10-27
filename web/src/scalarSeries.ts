@@ -1,7 +1,7 @@
 import { seriesKey, type ScalarPoint, type ScalarSeries } from "./api";
 import { RequestCache } from "./dataCache";
 
-export interface SeriesRequest { runId: string; metric: string }
+export interface SeriesRequest { runId: string; metric: string; stamp: number | null }
 export type MetricSeries = ReadonlyMap<string, ScalarPoint[]>;
 export type SeriesSnapshot = ReadonlyMap<string, MetricSeries>;
 interface SeriesResult extends SeriesRequest { points: ScalarPoint[] }
@@ -29,10 +29,10 @@ export class ScalarSeriesStore {
     if (next) this.snapshot = next;
   }
 
-  apply(results: SeriesResult[], version: string): void {
+  apply(results: SeriesResult[], versionFor: (request: SeriesRequest) => string): void {
     const changed = new Map<string, Map<string, ScalarPoint[]>>();
     for (const result of results) {
-      this.versions.set(seriesKey(result.runId, result.metric), version);
+      this.versions.set(seriesKey(result.runId, result.metric), versionFor(result));
       const runs = changed.get(result.metric) ?? this.snapshot.get(result.metric);
       if (runs?.get(result.runId) === result.points) continue;
       if (!changed.has(result.metric)) changed.set(result.metric, new Map(runs));
@@ -48,24 +48,26 @@ interface LoadOptions {
   selectedIds: Set<string>;
   requests: SeriesRequest[];
   smoothing: number;
-  refreshTick: number;
+  dataTick: number;
   load: (runId: string, metrics: string[], smoothing: number) => Promise<ScalarSeries[]>;
   schedule: (publish: () => void) => () => void;
   onPublish: (snapshot: SeriesSnapshot, pending: Set<string>) => void;
   onError: () => void;
 }
 
-export function loadScalarSeries({ store, cache, selectedIds, requests, smoothing, refreshTick, load, schedule, onPublish, onError }: LoadOptions): () => void {
-  const version = JSON.stringify([smoothing, refreshTick]);
+export function loadScalarSeries({ store, cache, selectedIds, requests, smoothing, dataTick, load, schedule, onPublish, onError }: LoadOptions): () => void {
+  // The version is per request: an unchanged last_recorded_at stamp keeps cached
+  // points valid across polls, while a changed stamp refetches only that run.
+  const versionFor = (request: SeriesRequest) => JSON.stringify([smoothing, dataTick, request.stamp]);
   store.retain(selectedIds);
   const unique = new Map(requests.map((request) => [seriesKey(request.runId, request.metric), request]));
-  const missing = [...unique.values()].filter((request) => !store.has(request, version));
+  const missing = [...unique.values()].filter((request) => !store.has(request, versionFor(request)));
   const pending = new Set(missing.map(({ runId, metric }) => seriesKey(runId, metric)));
   onPublish(store.read(), new Set(pending));
   let cancelled = false, unschedule: (() => void) | undefined;
   let results: SeriesResult[] = [], completed: string[] = [], failed = false;
   function commit() {
-    store.apply(results, version);
+    store.apply(results, versionFor);
     for (const key of completed) pending.delete(key);
     results = []; completed = [];
   }
@@ -88,7 +90,7 @@ export function loadScalarSeries({ store, cache, selectedIds, requests, smoothin
   }
   for (const [runId, entries] of byRun) for (let start = 0; start < entries.length; start += 16) {
     const batch = entries.slice(start, start + 16);
-    const keyed = new Map(batch.map((request) => [JSON.stringify([runId, request.metric, smoothing, refreshTick]), request.metric]));
+    const keyed = new Map(batch.map((request) => [JSON.stringify([runId, request.metric, smoothing, dataTick, request.stamp]), request.metric]));
     const promises = cache.loadMany([...keyed.keys()], async (keys) => {
       const records = await load(runId, keys.map((key) => keyed.get(key)!), smoothing);
       const points = new Map(records.map((record) => [record.metric, record.points]));

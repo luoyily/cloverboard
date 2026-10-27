@@ -291,3 +291,12 @@ def test_cli_one_shot_follow_shutdown_and_invalid_intervals(tmp_path, monkeypatc
         with pytest.raises(SystemExit) as error:
             main(["import-tensorboard", str(source), "--output", str(output), "--interval", interval])
         assert error.value.code == 2
+
+
+def test_imported_runs_carry_the_last_recorded_stamp(tmp_path):
+    source, output = tmp_path / "source", tmp_path / "output"
+    write_events(source / "experiment", "001", [event("loss", 2), event("loss", 1, step=20, wall_time=140)])
+    with TensorBoardImporter(source, output) as importer:
+        importer.poll()
+    summary = SqliteStorageReader(output).list_runs()[0]
+    assert summary.last_recorded_at == 140

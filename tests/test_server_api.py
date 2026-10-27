@@ -149,3 +149,89 @@ def test_metrics_endpoint_lists_reader_metrics():
     payload = client.get("/api/metrics", params={"run_id": "r1"}).json()
 
     assert payload == {"run_id": "r1", "metrics": ["train/loss", "val/acc"], "fields": [{"metric": "train/loss", "group": "train", "name": "loss"}, {"metric": "val/acc", "group": "val", "name": "acc"}]}
+
+
+def test_runs_etag_answers_304_until_the_catalog_changes(tmp_path):
+    from cloverboard.storage.protocols import RunMeta, ScalarRecord
+    from cloverboard.storage.sqlite_backend import SqliteStorageReader, SqliteStorageWriter
+
+    run_dir = tmp_path / "run_a"
+    run_dir.mkdir()
+    writer = SqliteStorageWriter(run_dir / "run.sqlite")
+    writer.init_run(RunMeta(run_id="run_a", name="a", started_at=1.0))
+    writer.append_scalars([ScalarRecord("loss", 1, 2.0, 0.5)])
+    writer.flush_and_close()
+    client = TestClient(create_app(SqliteStorageReader(tmp_path), logdir=tmp_path), base_url="http://127.0.0.1")
+
+    first = client.get("/api/runs")
+    assert first.status_code == 200
+    etag = first.headers["etag"]
+    unchanged = client.get("/api/runs", headers={"if-none-match": etag})
+    assert unchanged.status_code == 304
+    assert unchanged.content == b""
+
+    assert client.patch("/api/run-tags", params={"run_id": "run_a"}, json={"add": ["reviewed"], "remove": []}).status_code == 200
+    changed = client.get("/api/runs", headers={"if-none-match": etag})
+    assert changed.status_code == 200
+    assert changed.headers["etag"] != etag
+    assert "reviewed" in changed.json()[0]["tags"]
+
+
+def _gzip_shapes_app():
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
+    from starlette.routing import Route
+
+    from cloverboard.server.compression import JsonGzipMiddleware
+
+    async def big(request): return JSONResponse({"blob": "x" * 4096})
+    async def small(request): return JSONResponse({"ok": True})
+    async def stream(request): return StreamingResponse(iter(['{"blob": "', "x" * 4096, '"}']), media_type="application/json")
+    async def not_modified(request): return Response(status_code=304, headers={"etag": '"v1"'})
+    async def text(request): return PlainTextResponse("x" * 4096)
+    return JsonGzipMiddleware(Starlette(routes=[
+        Route("/big", big), Route("/small", small), Route("/stream", stream),
+        Route("/etag", not_modified), Route("/text", text),
+    ]))
+
+
+def test_json_gzip_compresses_only_complete_json_responses():
+    client = TestClient(_gzip_shapes_app(), base_url="http://127.0.0.1")
+
+    big = client.get("/big")
+    assert big.headers["content-encoding"] == "gzip"
+    assert int(big.headers["content-length"]) < len(big.content)
+    assert big.json()["blob"] == "x" * 4096
+    assert big.headers["vary"] == "Accept-Encoding"
+
+    assert "content-encoding" not in client.get("/small").headers
+    assert "content-encoding" not in client.get("/stream").headers
+    assert client.get("/stream").json()["blob"] == "x" * 4096
+    assert "content-encoding" not in client.get("/text").headers
+    revalidated = client.get("/etag")
+    assert revalidated.status_code == 304
+    assert "content-encoding" not in revalidated.headers
+
+    identity = client.get("/big", headers={"Accept-Encoding": "identity"})
+    assert "content-encoding" not in identity.headers
+
+
+def test_runs_etag_survives_gzip_clients(tmp_path):
+    from cloverboard.storage.protocols import RunMeta
+    from cloverboard.storage.sqlite_backend import SqliteStorageReader, SqliteStorageWriter
+
+    run_dir = tmp_path / "run_a"
+    run_dir.mkdir()
+    writer = SqliteStorageWriter(run_dir / "run.sqlite")
+    writer.init_run(RunMeta(run_id="run_a", name="a", started_at=1.0, config={"blob": "x" * 2048}))
+    writer.flush_and_close()
+    client = TestClient(create_app(SqliteStorageReader(tmp_path), logdir=tmp_path), base_url="http://127.0.0.1")
+
+    first = client.get("/api/runs")
+    assert first.headers["content-encoding"] == "gzip"
+    assert int(first.headers["content-length"]) < len(first.content)
+    assert first.json()[0]["run_id"] == "run_a"
+    etag = first.headers["etag"]
+    revalidated = client.get("/api/runs", headers={"if-none-match": etag})
+    assert revalidated.status_code == 304
+    assert "content-encoding" not in revalidated.headers

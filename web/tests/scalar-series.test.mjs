@@ -17,16 +17,16 @@ const { ScalarSeriesStore, loadScalarSeries } = await import(pathToFileURL(join(
 const { RequestCache } = await import(pathToFileURL(join(directory, "dataCache.mjs")));
 const { seriesKey } = await import(pathToFileURL(join(directory, "api.mjs")));
 const tick = () => new Promise((resolve) => setImmediate(resolve));
-const version = (smoothing = .6, refreshTick = 0) => JSON.stringify([smoothing, refreshTick]);
+const version = (smoothing = .6, dataTick = 0, stamp = null) => JSON.stringify([smoothing, dataTick, stamp]);
 const points = (value) => [{ step: 0, value }];
-const request = (runId, metric) => ({ runId, metric });
+const request = (runId, metric, stamp = null) => ({ runId, metric, stamp });
 
 function harness(load = async (runId, metrics) => metrics.map((metric) => ({ metric, points: points(runId.length + metric.length) }))) {
   const store = new ScalarSeriesStore(), cache = new RequestCache(128), frames = new Set(), publications = [], calls = [];
   let errors = 0;
   return { store, cache, publications, calls, frames, get errors() { return errors; },
     start(requests, overrides = {}) {
-      return loadScalarSeries({ store, cache, selectedIds: new Set(requests.map((r) => r.runId)), requests, smoothing: .6, refreshTick: 0,
+      return loadScalarSeries({ store, cache, selectedIds: new Set(requests.map((r) => r.runId)), requests, smoothing: .6, dataTick: 0,
         load: (...args) => { calls.push(args); return load(...args); },
         schedule: (publish) => { frames.add(publish); return () => frames.delete(publish); },
         onPublish: (snapshot, pending) => publications.push({ snapshot, pending }), onError: () => errors++, ...overrides,
@@ -38,14 +38,14 @@ function harness(load = async (runId, metrics) => metrics.map((metric) => ({ met
 
 test("series snapshots isolate metrics and preserve references for unchanged data", () => {
   const store = new ScalarSeriesStore(), a = points(1), b = points(2);
-  store.apply([{ ...request("a", "loss"), points: a }, { ...request("b", "psnr"), points: b }], version());
+  store.apply([{ ...request("a", "loss"), points: a }, { ...request("b", "psnr"), points: b }], () => version());
   const before = store.read();
-  store.apply([{ ...request("a", "loss"), points: a }], version(.8));
+  store.apply([{ ...request("a", "loss"), points: a }], () => version(.8));
   store.retain(new Set(["a", "b"]));
   assert.equal(store.read(), before);
   assert.ok(store.has(request("a", "loss"), version(.8)));
   assert.equal(store.has(request("a", "loss"), version()), false);
-  store.apply([{ ...request("a", "loss"), points: points(3) }], version(.8));
+  store.apply([{ ...request("a", "loss"), points: points(3) }], () => version(.8));
   assert.notEqual(store.read().get("loss"), before.get("loss"));
   assert.equal(store.read().get("psnr"), before.get("psnr"));
   assert.equal(before.get("loss").get("a"), a);
@@ -92,7 +92,7 @@ test("smoothing and refresh invalidate freshness, while folded curves retain the
   assert.deepEqual(h.calls.at(-1)[1], ["psnr", "empty"]);
   stop = h.start(requests, { smoothing: .8 }); await tick(); h.flush(); stop();
   assert.equal(h.calls.length, 3);
-  stop = h.start(requests, { smoothing: .8, refreshTick: 1 });
+  stop = h.start(requests, { smoothing: .8, dataTick: 1 });
   assert.equal(h.publications.at(-1).pending.size, 3);
   await tick(); h.flush(); stop();
   assert.equal(h.calls.length, 4);
@@ -117,7 +117,7 @@ test("a cancelled older response cannot replace the current refresh", async () =
   const releases = [], h = harness((id, metrics) => new Promise((resolve) => releases.push((value) => resolve(metrics.map((metric) => ({ metric, points: points(value) }))))));
   const requests = [request("a", "loss")];
   const oldStop = h.start(requests); await tick(); oldStop();
-  const newStop = h.start(requests, { refreshTick: 1 }); await tick();
+  const newStop = h.start(requests, { dataTick: 1 }); await tick();
   releases[1](2); await tick(); h.flush();
   const snapshot = h.store.read(), published = h.publications.length;
   releases[0](1); await tick(); h.flush();
@@ -151,15 +151,48 @@ test("failed batches retain old curves, clear loading and can retry", async () =
   const requests = [request("a", "loss")];
   let stop = h.start(requests); await tick(); h.flush(); stop();
   const snapshot = h.store.read(); fail = true;
-  stop = h.start(requests, { refreshTick: 1 }); await tick(); h.flush(); stop();
+  stop = h.start(requests, { dataTick: 1 }); await tick(); h.flush(); stop();
   assert.equal(h.errors, 1);
   assert.equal(h.store.read(), snapshot);
   assert.equal(h.publications.at(-1).pending.size, 0);
   assert.equal(h.store.has(requests[0], version(.6, 1)), false);
   fail = false;
-  stop = h.start(requests, { refreshTick: 1 }); await tick(); h.flush(); stop();
+  stop = h.start(requests, { dataTick: 1 }); await tick(); h.flush(); stop();
   assert.ok(h.store.has(requests[0], version(.6, 1)));
   assert.equal(h.calls.length, 3);
+});
+
+test("an unchanged recorded stamp across polls refetches nothing", async () => {
+  const h = harness();
+  const requests = [request("a", "loss", 100), request("b", "loss", 100)];
+  let stop = h.start(requests); await tick(); h.flush(); stop();
+  assert.equal(h.calls.length, 2);
+  stop = h.start(requests); await tick(); h.flush(); stop();
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.publications.at(-1).pending.size, 0);
+});
+
+test("a changed stamp refetches only the runs whose data changed", async () => {
+  const h = harness();
+  const requests = [request("a", "loss", 100), request("b", "loss", 100)];
+  let stop = h.start(requests); await tick(); h.flush(); stop();
+  assert.equal(h.calls.length, 2);
+  const grown = [request("a", "loss", 100), request("b", "loss", 200)];
+  stop = h.start(grown); await tick(); h.flush(); stop();
+  assert.equal(h.calls.length, 3);
+  assert.equal(h.calls.at(-1)[0], "b");
+  assert.ok(h.store.has(request("b", "loss", 200), version(.6, 0, 200)));
+  assert.ok(h.store.has(request("a", "loss", 100), version(.6, 0, 100)));
+});
+
+test("a dataTick bump forces every series to reload despite unchanged stamps", async () => {
+  const h = harness();
+  const requests = [request("a", "loss", 100), request("b", "loss", 100)];
+  let stop = h.start(requests); await tick(); h.flush(); stop();
+  assert.equal(h.calls.length, 2);
+  stop = h.start(requests, { dataTick: 1 }); await tick(); h.flush(); stop();
+  assert.equal(h.calls.length, 4);
+  assert.ok(h.store.has(request("a", "loss", 100), version(.6, 1, 100)));
 });
 
 test("incomplete responses cannot silently mark missing metrics as loaded", async () => {

@@ -31,7 +31,7 @@ function formatDelta(value: number | null, decimals: number): string {
 
 interface MetricChartProps {
   loading: boolean;
-  refreshTick: number;
+  dataTick: number;
   expanded: boolean; onChange: WorkspaceUpdate;
   metric: string; title: string; yScale: "linear" | "log"; scaleOverride?: "linear" | "log"; runs: RunSummary[]; series: MetricSeries; colors: Map<string, string>; smoothing: number;
   tooltipDecimals: number;
@@ -45,7 +45,7 @@ interface MetricChartProps {
   focusedId: string | null; onFocusRun: (id: string | null) => void; topIds: Set<string> | null;
 }
 
-export default memo(function MetricChart({ metric, title, loading, refreshTick, expanded, onChange, yScale, scaleOverride, runs, series, colors, smoothing, tooltipDecimals, tooltipSort, tooltipPlacement, showLegend, onLocateRun, timeDisplay, deltaDisplay, warmupStep, warmupOverride, globalWarmup, summaries, target, baselineId, zoom, focusedId, onFocusRun, topIds }: MetricChartProps) {
+export default memo(function MetricChart({ metric, title, loading, dataTick, expanded, onChange, yScale, scaleOverride, runs, series, colors, smoothing, tooltipDecimals, tooltipSort, tooltipPlacement, showLegend, onLocateRun, timeDisplay, deltaDisplay, warmupStep, warmupOverride, globalWarmup, summaries, target, baselineId, zoom, focusedId, onFocusRun, topIds }: MetricChartProps) {
   const containerRef = useRef<HTMLDivElement>(null), clipId = useId(), helpId = useId();
   const cardRef = useRef<HTMLElement>(null);
   const [measuredWidth, setWidth] = useState(0);
@@ -106,7 +106,7 @@ export default memo(function MetricChart({ metric, title, loading, refreshTick, 
   const maxStep = zoom?.x_max ?? stepExtent?.[1] ?? 1;
   const logarithmic = yScale === "log";
   const manualY = zoom?.y_min != null && zoom?.y_max != null && (!logarithmic || zoom.y_min > 0);
-  const fit = useWarmupRange(runs, metric, manualY || zoom ? undefined : warmupStep, undefined, undefined, refreshTick);
+  const fit = useWarmupRange(runs, metric, manualY || zoom ? undefined : warmupStep, undefined, undefined, dataTick);
   const fitting = useMemo(() => fittedDomain(valid, smoothing > 0, logarithmic, warmupStep, fit?.bounds), [valid, smoothing, logarithmic, warmupStep, fit?.bounds]);
   const [fitLow, fitHigh] = fitting.domain;
   const fitNote = manualY ? "Box zoom fixes Y. Change Y range to refit." : fitting.empty && !loading ? "No usable samples after cutoff · Using Auto." : fit?.status === "error" ? "Exact Y bounds unavailable · Using loaded samples." : undefined;

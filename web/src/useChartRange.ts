@@ -4,15 +4,15 @@ import { RequestCache } from "./dataCache";
 
 const boundsCache = new RequestCache<ScalarBounds>(512, 4);
 
-export function useWarmupRange(runs: RunSummary[], metric: string, step: number | undefined, minimum: number | undefined, maximum: number | undefined, refreshTick: number) {
-  const key = JSON.stringify([runs.map((run) => run.run_id), metric, step, minimum, maximum, refreshTick]);
+export function useWarmupRange(runs: RunSummary[], metric: string, step: number | undefined, minimum: number | undefined, maximum: number | undefined, dataTick: number) {
+  const key = JSON.stringify([runs.map((run) => [run.run_id, run.last_recorded_at]), metric, step, minimum, maximum, dataTick]);
   const [result, setResult] = useState<{ key: string; bounds: ScalarBounds[]; status: "ready" | "empty" | "error" } | null>(null);
   useEffect(() => {
     if (step === undefined) return;
     let cancelled = false;
     const cutoff = Math.max(step, minimum ?? -Infinity);
     void (maximum !== undefined && cutoff > maximum ? Promise.resolve([]) : Promise.all(runs.map((run) => {
-      const requestKey = JSON.stringify([run.run_id, metric, cutoff, maximum, refreshTick]);
+      const requestKey = JSON.stringify([run.run_id, metric, cutoff, maximum, dataTick, run.last_recorded_at]);
       return boundsCache.load(requestKey, () => fetchBounds(run.run_id, metric, cutoff, maximum));
     })))
       .then((bounds) => {

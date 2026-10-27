@@ -13,19 +13,19 @@ function schedulePublish(publish: () => void): () => void {
   return cancel;
 }
 
-export function useScalarSeries(selectedIds: string[], requests: SeriesRequest[], smoothing: number, refreshTick: number, enabled: boolean) {
+export function useScalarSeries(selectedIds: string[], requests: SeriesRequest[], smoothing: number, dataTick: number, enabled: boolean) {
   const [store] = useState(() => new ScalarSeriesStore());
   const [cache] = useState(() => new RequestCache<ScalarPoint[]>(128));
   const [series, setSeries] = useState(() => store.read());
   const [progress, setProgress] = useState({ key: "", pending: new Set<string>() });
   const [error, setError] = useState(false);
   const selectionKey = JSON.stringify(selectedIds);
-  const requestKey = JSON.stringify([requests, smoothing, refreshTick]);
-  const version = JSON.stringify([smoothing, refreshTick]);
+  const requestKey = JSON.stringify([requests, smoothing, dataTick]);
+  const versionFor = (request: SeriesRequest) => JSON.stringify([smoothing, dataTick, request.stamp]);
   useEffect(() => {
     if (!enabled) return;
     setError(false);
-    return loadScalarSeries({ store, cache, selectedIds: new Set(selectedIds), requests, smoothing, refreshTick,
+    return loadScalarSeries({ store, cache, selectedIds: new Set(selectedIds), requests, smoothing, dataTick,
       load: fetchSeriesBatch, schedule: schedulePublish,
       onPublish: (snapshot, pending) => { setSeries(snapshot); setProgress({ key: requestKey, pending }); },
       onError: () => setError(true),
@@ -33,6 +33,6 @@ export function useScalarSeries(selectedIds: string[], requests: SeriesRequest[]
   }, [enabled, selectionKey, requestKey]);
   const loadingMetrics = new Set(requests.filter((request) => progress.key === requestKey
     ? progress.pending.has(seriesKey(request.runId, request.metric))
-    : !store.has(request, version)).map(({ metric }) => metric));
+    : !store.has(request, versionFor(request))).map(({ metric }) => metric));
   return { series, loadingMetrics, error };
 }

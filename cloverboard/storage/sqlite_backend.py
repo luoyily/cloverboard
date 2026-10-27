@@ -98,6 +98,15 @@ class SqliteStorageWriter:
                 (_dump(config),),
             )
 
+    def _touch_last_recorded(self, wall_time: float) -> None:
+        """Keep the newest record timestamp in meta so summaries avoid table scans."""
+        if self._conn is None or not math.isfinite(wall_time):
+            return
+        row = self._conn.execute("SELECT value FROM meta WHERE key='last_recorded_at'").fetchone()
+        current = _loads(row[0], None) if row else None
+        if not isinstance(current, (int, float)) or wall_time > current:
+            self._conn.execute("INSERT OR REPLACE INTO meta VALUES ('last_recorded_at', ?)", (_dump(wall_time),))
+
     def append_scalars(self, batch: list[ScalarRecord]) -> None:
         if self._conn is None or not batch:
             return
@@ -110,6 +119,9 @@ class SqliteStorageWriter:
                     ("time_origin", _dump(first.wall_time)),
                     ("time_origin_kind", _dump("step_zero" if origin else "first_sample")),
                 ])
+            newest = max((record.wall_time for record in batch if math.isfinite(record.wall_time)), default=None)
+            if newest is not None:
+                self._touch_last_recorded(newest)
             self._conn.executemany(
                 "INSERT INTO scalars(metric, step, wall_time, value) VALUES (?, ?, ?, ?) "
                 "ON CONFLICT(metric, step) DO UPDATE SET wall_time=excluded.wall_time, value=excluded.value",
@@ -120,6 +132,7 @@ class SqliteStorageWriter:
         if self._conn is None:
             return
         with self._conn:
+            self._touch_last_recorded(image.wall_time)
             self._conn.execute("INSERT INTO images VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                (image.image_id, image.name, image.step, image.wall_time, image.path, image.width, image.height, image.format, image.caption))
 
@@ -135,6 +148,7 @@ class SqliteStorageWriter:
     def append_audio(self, audio: AudioRecord) -> None:
         if self._conn is not None:
             with self._conn:
+                self._touch_last_recorded(audio.wall_time)
                 self._conn.execute("INSERT INTO audio VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                    (audio.audio_id, audio.name, audio.step, audio.wall_time, audio.path, audio.sample_rate, audio.channels, audio.frames, audio.caption))
 
@@ -149,6 +163,7 @@ class SqliteStorageWriter:
     def append_text(self, text: TextRecord) -> None:
         if self._conn is not None:
             with self._conn:
+                self._touch_last_recorded(text.wall_time)
                 self._conn.execute("INSERT INTO texts VALUES (?, ?, ?, ?) ON CONFLICT(name,step) "
                     "DO UPDATE SET wall_time=excluded.wall_time, text=excluded.text",
                     (text.name, text.step, text.wall_time, text.text))
@@ -288,11 +303,8 @@ class SqliteStorageReader:
             tags = [row[0] for row in connection.execute("SELECT tag FROM tags ORDER BY tag")]
             note_row = connection.execute("SELECT body FROM run_notes WHERE id=1").fetchone()
             has_scalars = connection.execute("SELECT EXISTS(SELECT 1 FROM scalars)").fetchone()[0]
-            last_recorded = connection.execute(
-                "SELECT MAX(stamp) FROM (SELECT MAX(wall_time) stamp FROM scalars "
-                "UNION ALL SELECT MAX(wall_time) FROM images UNION ALL SELECT MAX(wall_time) FROM audio "
-                "UNION ALL SELECT MAX(wall_time) FROM texts)"
-            ).fetchone()[0]
+            # Writers maintain this stamp in meta; it replaces four MAX(wall_time) scans.
+            last_recorded = _loads(meta.get("last_recorded_at"), None)
         return RunSummary(
             run_id=run_id,
             name=_loads(meta.get("name"), None),

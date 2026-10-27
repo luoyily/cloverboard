@@ -1,10 +1,13 @@
 """HTTP routes backed by local and one-hop storage readers."""
 
+import hashlib
+import json
 import math
 from dataclasses import asdict
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 
 from cloverboard.server.models import (
     MetricListResponse,
@@ -41,11 +44,13 @@ def get_run_id(run_id: str) -> str:
 def list_runs(
     request: Request,
     reader: StorageReader | None = Depends(get_reader),
-) -> list[RunSummaryResponse]:
-    """List all runs with config and source metadata; no server-side pagination or filtering."""
-    if reader is None:
-        return []
-    return [
+) -> list[RunSummaryResponse] | Response:
+    """List all runs with config and source metadata; no server-side pagination or filtering.
+
+    Responses carry a content ETag; an unchanged payload answers 304 to If-None-Match,
+    so polling costs an empty body instead of the full run list.
+    """
+    rows = [] if reader is None else [
         RunSummaryResponse(
             run_id=run.run_id,
             name=run.name,
@@ -60,6 +65,11 @@ def list_runs(
         )
         for run in reader.list_runs()
     ]
+    payload = [row.model_dump(mode="json", exclude_unset=True) for row in rows]
+    etag = '"' + hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:32] + '"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+    return JSONResponse(payload, headers={"ETag": etag})
 
 
 @router.get("/api/metrics", tags=["Scalars"], response_model=MetricListResponse)

@@ -11,7 +11,7 @@ const EMPTY_SERIES: MetricSeries = new Map();
 interface ChartGridProps {
   metrics: MetricField[];
   loadingMetrics: Set<string>;
-  refreshTick: number;
+  dataTick: number;
   runs: RunSummary[];
   series: SeriesSnapshot;
   colors: Map<string, string>;
@@ -25,7 +25,7 @@ interface ChartGridProps {
   topIds: Set<string> | null;
 }
 
-export default function ChartGrid({ metrics, loadingMetrics, refreshTick, runs, series, colors, smoothing, state, summaries, onChange, focusedId, onFocusRun, onLocateRun, topIds }: ChartGridProps) {
+export default function ChartGrid({ metrics, loadingMetrics, dataTick, runs, series, colors, smoothing, state, summaries, onChange, focusedId, onFocusRun, onLocateRun, topIds }: ChartGridProps) {
   const groups = useMemo(() => {
     const grouped = new Map<string, MetricField[]>();
     for (const field of metrics) {
@@ -42,7 +42,7 @@ export default function ChartGrid({ metrics, loadingMetrics, refreshTick, runs, 
       return <section className="metric-group" key={group} aria-label={group}>
         <button className="metric-group-heading" aria-expanded={!collapsed} onClick={() => onChange((current) => ({ collapsed_groups: current.collapsed_groups.includes(group) ? current.collapsed_groups.filter((item) => item !== group) : [...current.collapsed_groups, group] }))}><Icon size={13} /><span>{group}</span></button>
         {!collapsed && <div className="metric-group-charts">{fields.map(({ metric, name }) => <MetricChart key={metric}
-          metric={metric} title={name} loading={loadingMetrics.has(metric)} refreshTick={refreshTick} runs={runs} series={series.get(metric) ?? EMPTY_SERIES} colors={colors} smoothing={smoothing}
+          metric={metric} title={name} loading={loadingMetrics.has(metric)} dataTick={dataTick} runs={runs} series={series.get(metric) ?? EMPTY_SERIES} colors={colors} smoothing={smoothing}
           expanded={state.expanded_charts.includes(metric)}
           onChange={onChange}
           yScale={state.chart_scales[metric] ?? state.y_scale} scaleOverride={state.chart_scales[metric]}

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { fetchMetrics, fetchRuns, fetchSummary, fetchSources, pooledResults, seriesKey, type RunSummary, type ScalarSummary, type SourceStatus, type MetricField } from "./api";
+import { fetchMetrics, fetchRunsWithEtag, fetchSummary, fetchSources, pooledResults, seriesKey, type RunSummary, type RunsCacheEntry, type ScalarSummary, type SourceStatus, type MetricField } from "./api";
 import { RequestCache } from "./dataCache";
 import { applyTheme, loadThemeMode, nextThemeMode, resolveTheme, saveThemeMode, type ResolvedTheme, type ThemeMode } from "./theme";
 import { defaultMetricColumns, flattenConfig, parameterColumns } from "./comparison";
@@ -42,7 +42,11 @@ export default function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(loadThemeMode);
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => resolveTheme(loadThemeMode()));
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [refreshTick, setRefreshTick] = useState(0);
+  // pollTick drives the background catalog poll; dataTick marks forced reloads that
+  // bypass every per-run cache (manual refresh, note saves).
+  const [pollTick, setPollTick] = useState(0);
+  const [dataTick, setDataTick] = useState(0);
+  const runsCache = useRef(new Map<string, RunsCacheEntry>());
   const [dataError, setDataError] = useState(false);
   const [discovering, setDiscovering] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
@@ -63,19 +67,21 @@ export default function App() {
   }, [state.selected_ids, state.baseline_id, runs]);
   const selectedRuns = useMemo(() => orderedRuns.filter((run) => selectedIds.has(run.run_id)), [orderedRuns, selectedIds]);
   const selectionKey = selectedRuns.map((run) => run.run_id).sort().join("\u0000");
+  // Cache entries carry each run's last_recorded_at so a poll only refetches runs whose data changed.
+  const recordedVersion = selectedRuns.map((run) => `${run.run_id}:${run.last_recorded_at ?? ""}`).sort().join("\u0000");
   const metricFields = useMemo(() => [...new Map(selectedRuns.flatMap((run) => catalogs.get(run.run_id)?.fields ?? []).map((field) => [field.metric, field])).values()].sort((a, b) => a.metric.localeCompare(b.metric)), [selectionKey, catalogs]);
   const metrics = useMemo(() => metricFields.map((field) => field.metric).sort(), [metricFields]);
-  const catalogReady = selectedRuns.every((run) => catalogs.get(run.run_id)?.tick === refreshTick);
+  const catalogReady = selectedRuns.every((run) => catalogs.get(run.run_id)?.tick === dataTick);
   const needsCatalog = state.panel !== "images" || state.colors.top_k.enabled;
   const needsSeries = state.panel === "charts";
   const filteredMetricFields = useMemo(() => metricFields.filter((field) => field.metric.toLowerCase().includes(state.metric_filter.trim().toLowerCase())), [metricFields, state.metric_filter]);
   const visibleMetricNames = new Set(filteredMetricFields.map((field) => field.metric));
-  const seriesRequests = selectedRuns.flatMap((run) => (catalogs.get(run.run_id)?.fields ?? []).filter((field) => !state.collapsed_groups.includes(field.group) && visibleMetricNames.has(field.metric)).map(({ metric }) => ({ runId: run.run_id, metric })));
-  const { series, loadingMetrics, error: seriesError } = useScalarSeries(selectedRuns.map((run) => run.run_id), seriesRequests, state.smoothing, refreshTick, ready && needsSeries);
+  const seriesRequests = selectedRuns.flatMap((run) => (catalogs.get(run.run_id)?.fields ?? []).filter((field) => !state.collapsed_groups.includes(field.group) && visibleMetricNames.has(field.metric)).map(({ metric }) => ({ runId: run.run_id, metric, stamp: run.last_recorded_at })));
+  const { series, loadingMetrics, error: seriesError } = useScalarSeries(selectedRuns.map((run) => run.run_id), seriesRequests, state.smoothing, dataTick, ready && needsSeries);
   const chosenMetrics = useMemo(() => (state.metric_columns ?? defaultMetricColumns(metrics)).filter((name) => metrics.includes(name)), [state.metric_columns, metrics]);
   const summaryMetrics = state.panel === "table" ? [...chosenMetrics] : state.panel === "charts" ? metrics.filter((metric) => state.targets[metric]) : [];
   if (state.colors.top_k.enabled && state.colors.top_k.metric && !summaryMetrics.includes(state.colors.top_k.metric)) summaryMetrics.push(state.colors.top_k.metric);
-  const summaryKey = JSON.stringify([selectionKey, summaryMetrics, summaryMetrics.map((metric) => state.targets[metric] ?? null), refreshTick]);
+  const summaryKey = JSON.stringify([selectionKey, summaryMetrics, summaryMetrics.map((metric) => state.targets[metric] ?? null), dataTick, recordedVersion]);
 
   useEffect(() => {
     applyTheme(themeMode);
@@ -89,6 +95,7 @@ export default function App() {
   }, [themeMode]);
 
   useEffect(() => {
+    const controller = new AbortController();
     let cancelled = false;
     setDiscovering(true);
     let aggregateLoaded = false;
@@ -97,27 +104,32 @@ export default function App() {
       setRuns([...nextRuns].sort((a, b) => b.started_at - a.started_at));
       setStatus("ready");
     };
+    const cachedEntry = (localOnly: boolean) => runsCache.current.get(String(localOnly)) ?? null;
+    const storeEntry = (localOnly: boolean, entry: RunsCacheEntry) => runsCache.current.set(String(localOnly), entry);
     async function loadRuns() {
       try {
-        const configured = await fetchSources().catch(() => null);
+        const configured = await fetchSources(controller.signal).catch(() => null);
         if (cancelled) return;
         if (configured) setSources(configured);
         // Local-only installations need one scan. With peers, publish local
         // discoveries independently so a slow source cannot delay their charts.
         if (configured === null || configured.some((source) => source.kind === "peer")) {
-          void fetchRuns(true).then((localRuns) => {
+          void fetchRunsWithEtag(cachedEntry(true), true, controller.signal).then((entry) => {
             if (cancelled || aggregateLoaded) return;
+            storeEntry(true, entry);
+            const localRuns = entry.data;
             setRuns((previous) => [...localRuns, ...previous.filter((run) => !localRuns.some((local) => local.run_id === run.run_id) && run.source !== "local")].sort((a, b) => b.started_at - a.started_at));
             setStatus("ready");
           }).catch(() => {});
         }
-        const nextRuns = await fetchRuns();
+        const entry = await fetchRunsWithEtag(cachedEntry(false), false, controller.signal);
         if (cancelled) return;
+        storeEntry(false, entry);
         aggregateLoaded = true;
-        publish(nextRuns);
+        publish(entry.data);
         setDiscovering(false);
         if (configured === null || configured.some((source) => source.kind === "peer")) {
-          const sourceStatus = await fetchSources().catch(() => configured ?? []);
+          const sourceStatus = await fetchSources(controller.signal).catch(() => configured ?? []);
           if (!cancelled) setSources(sourceStatus);
         }
       } catch {
@@ -125,13 +137,13 @@ export default function App() {
       }
     }
     void loadRuns();
-    return () => { cancelled = true; };
-  }, [refreshTick]);
+    return () => { cancelled = true; controller.abort(); };
+  }, [pollTick, dataTick]);
 
   useEffect(() => {
     if (!ready || state.refresh_interval === 0) return;
     const timer = window.setInterval(() => {
-      if (!document.hidden) setRefreshTick((tick) => tick + 1);
+      if (!document.hidden) setPollTick((tick) => tick + 1);
     }, state.refresh_interval * 1000);
     return () => window.clearInterval(timer);
   }, [ready, state.refresh_interval]);
@@ -147,14 +159,14 @@ export default function App() {
     let cancelled = false;
     const controller = new AbortController();
     setDataError(false);
-    void pooledResults(selectedRuns, (run) => catalogCache.current.load(JSON.stringify([run.run_id, refreshTick]), async () => (await fetchMetrics(run.run_id)).fields), 4, (result, index) => {
+    void pooledResults(selectedRuns, (run) => catalogCache.current.load(JSON.stringify([run.run_id, dataTick, run.last_recorded_at]), async () => (await fetchMetrics(run.run_id)).fields), 4, (result, index) => {
       if (cancelled) return;
       const id = selectedRuns[index].run_id;
-      setCatalogs((previous) => new Map(previous).set(id, { tick: refreshTick, fields: result.status === "fulfilled" ? result.value : previous.get(id)?.fields ?? [] }));
+      setCatalogs((previous) => new Map(previous).set(id, { tick: dataTick, fields: result.status === "fulfilled" ? result.value : previous.get(id)?.fields ?? [] }));
       if (result.status === "rejected") setDataError(true);
     }, controller.signal);
     return () => { cancelled = true; controller.abort(); };
-  }, [ready, needsCatalog, selectionKey, refreshTick]);
+  }, [ready, needsCatalog, selectionKey, dataTick, recordedVersion]);
 
   useEffect(() => {
     if (!ready || !needsCatalog) return;
@@ -162,16 +174,16 @@ export default function App() {
     const controller = new AbortController();
     const requests = selectedRuns.flatMap((run) => summaryMetrics.map((metric) => ({ run, metric })));
     void pooledResults(requests, async ({ run, metric }) => {
-      const target = state.targets[metric], cacheKey = JSON.stringify([run.run_id, metric, target ?? null, refreshTick]);
+      const target = state.targets[metric], cacheKey = JSON.stringify([run.run_id, metric, target ?? null, dataTick, run.last_recorded_at]);
       const summary = await summaryCache.current.load(cacheKey, () => fetchSummary(run.run_id, metric, target));
       return [seriesKey(run.run_id, metric), summary] as const;
     }, 4, undefined, controller.signal)
       .then((pairs) => { if (!cancelled) { setSummaries(new Map(pairs.filter((pair) => pair.status === "fulfilled").map((pair) => pair.value))); setLoadedSummary(summaryKey); if (pairs.some((pair) => pair.status === "rejected")) setDataError(true); } })
       .catch(() => { if (!cancelled) { setDataError(true); setSummaries(new Map()); } });
     return () => { cancelled = true; controller.abort(); };
-  }, [ready, needsCatalog, summaryKey, refreshTick]);
+  }, [ready, needsCatalog, summaryKey]);
 
-  const { colors, registry, localOnly: colorsLocalOnly, ready: palettesReady, savePalette, deletePalette } = useColors(runs, state.colors, resolvedTheme, workspace.workspaceId, workspace.writable, refreshTick);
+  const { colors, registry, localOnly: colorsLocalOnly, ready: palettesReady, savePalette, deletePalette } = useColors(runs, state.colors, resolvedTheme, workspace.workspaceId, workspace.writable, dataTick);
   const visibleSummaries = loadedSummary === summaryKey ? summaries : EMPTY_SUMMARIES;
   const topIds = useMemo(() => loadedSummary === summaryKey ? topRunIds(selectedRuns, summaries, state.colors.top_k) : null, [selectedRuns, summaries, state.colors.top_k, loadedSummary, summaryKey]);
   const configs = useMemo(() => new Map(selectedRuns.map((run) => [run.run_id, flattenConfig(run.config)])), [selectedRuns]);
@@ -221,14 +233,14 @@ export default function App() {
   } else if (selectedRuns.length === 0) {
     content = <div className="empty">Select a run to view its metrics.</div>;
   } else if (state.panel === "images") {
-    content = <MediaPanel key={state.media_type} workspaceId={workspace.workspaceId} runs={selectedRuns} state={state} colors={colors} refreshTick={refreshTick} onChange={update} />;
+    content = <MediaPanel key={state.media_type} workspaceId={workspace.workspaceId} runs={selectedRuns} state={state} colors={colors} refreshTick={pollTick + dataTick} onChange={update} />;
   } else if (state.panel === "table") {
     content = <CompareTable runs={selectedRuns} configs={configs} params={params} metrics={chosenMetrics} summaries={visibleSummaries} colors={colors} state={state}
       loading={(!metrics.length && !catalogReady) || loadedSummary !== summaryKey} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onAppearance={setAppearance} onDetails={openDetails} onBaseline={setBaseline} topIds={topIds} onEditTags={setTagRuns} />;
   } else if (!metricFields.length && !catalogReady) {
     content = <div className="empty" role="status">Loading metrics…</div>;
   } else {
-    content = <ChartGrid metrics={filteredMetricFields} loadingMetrics={loadingMetrics} refreshTick={refreshTick} runs={selectedRuns} series={series} colors={colors} smoothing={state.smoothing} state={state} summaries={visibleSummaries} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onLocateRun={locateRun} topIds={topIds} />;
+    content = <ChartGrid metrics={filteredMetricFields} loadingMetrics={loadingMetrics} dataTick={dataTick} runs={selectedRuns} series={series} colors={colors} smoothing={state.smoothing} state={state} summaries={visibleSummaries} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onLocateRun={locateRun} topIds={topIds} />;
   }
 
   return <div className="app" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
@@ -237,7 +249,7 @@ export default function App() {
       baselineId={state.baseline_id} focusedId={focusedId} onFocusRun={setFocusedId} onAppearance={setAppearance} onDetails={openDetails} onBaseline={setBaseline} />
     <div className="workspace">
       <TopBar themeMode={themeMode} onThemeToggle={() => setThemeMode((mode) => nextThemeMode(mode))}
-        onRefresh={() => { setRefreshTick((tick) => tick + 1); if (workspace.loadError) workspace.retry(); }}
+        onRefresh={() => { setDataTick((tick) => tick + 1); if (workspace.loadError) workspace.retry(); }}
         state={state} views={workspace.views} writable={workspace.writable} ready={ready} localOnly={workspace.localOnly}
         onChange={update} onOpenView={workspace.openView} onSaveView={workspace.saveView} onDeleteView={workspace.deleteView} onRenameView={workspace.renameView}
         metrics={metrics}
@@ -254,7 +266,7 @@ export default function App() {
       </main>
     </div>
     {appearance && <RunAppearance key={appearance.run_id} run={appearance} runs={runs} selectedIds={selectedIds} settings={state.colors} registry={registry} colors={colors} theme={resolvedTheme} onChange={(colors) => update({ colors })} onClose={() => { setAppearance(null); setFocusedId(null); }} />}
-    {detailsRun && <Suspense fallback={<div className="details-loading" role="status">Loading details…</div>}><RunDetailsDialog key={detailsRun.run.run_id} run={detailsRun.run} initialTab={detailsRun.tab} onEditTags={setTagRuns} onNoteSaved={() => setRefreshTick((tick) => tick + 1)} onClose={() => { setDetailsRun(null); setFocusedId(null); }} /></Suspense>}
+    {detailsRun && <Suspense fallback={<div className="details-loading" role="status">Loading details…</div>}><RunDetailsDialog key={detailsRun.run.run_id} run={detailsRun.run} initialTab={detailsRun.tab} onEditTags={setTagRuns} onNoteSaved={() => setDataTick((tick) => tick + 1)} onClose={() => { setDetailsRun(null); setFocusedId(null); }} /></Suspense>}
     {tagRuns && <TagsDialog runs={tagRuns} onSaved={tagsSaved} onClose={() => setTagRuns(null)} />}
   </div>;
 }

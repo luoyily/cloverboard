@@ -238,3 +238,21 @@ def test_flush_and_close_is_idempotent(tmp_path):
 
     writer.flush_and_close()
     writer.flush_and_close()
+
+
+def test_summary_stamp_tracks_newest_record_across_append_types(tmp_path):
+    from cloverboard.storage.protocols import AudioRecord, ImageRecord, TextRecord
+
+    writer, _ = _create_writer(tmp_path)
+    writer.init_run(RunMeta(run_id="run_20261022_001", name="demo", started_at=1.0))
+    writer.append_scalars([ScalarRecord("train/loss", 1, 10.0, 0.9)])
+    writer.append_image(ImageRecord("i1", "validation/prediction", 1, 20.0, "imgs/i1.png", 4, 4, "png"))
+    writer.append_audio(AudioRecord("a1", "validation/audio", 1, 25.0, "audio/a1.wav", 24000, 1, 24000))
+    writer.append_text(TextRecord("debug/output", 1, 30.0, "hello"))
+    # An older record after newer ones must not move the stamp backwards.
+    writer.append_scalars([ScalarRecord("train/loss", 2, 5.0, 0.8)])
+    writer.flush_and_close()
+
+    summary = SqliteStorageReader(tmp_path).list_runs()[0]
+
+    assert summary.last_recorded_at == 30.0

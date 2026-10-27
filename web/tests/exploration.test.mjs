@@ -23,7 +23,7 @@ const colors = await import(pathToFileURL(join(directory, "colors.mjs")));
 const readout = await import(pathToFileURL(join(directory, "readout.mjs")));
 const { imagesAtStep, sampleSteps } = await import(pathToFileURL(join(directory, "imageTimeline.mjs")));
 const { nearestPoint, buildPath, compareReadouts, valueDomain, fittedDomain, logTicks, visiblePoints, tailStepRange, stepAxis } = await import(pathToFileURL(join(directory, "chartMath.mjs")));
-const { pooledResults, getJson } = await import(pathToFileURL(join(directory, "api.mjs")));
+const { pooledResults, getJson, fetchRunsWithEtag } = await import(pathToFileURL(join(directory, "api.mjs")));
 const { BoundedCache, RequestCache } = await import(pathToFileURL(join(directory, "dataCache.mjs")));
 const { defaultWorkspaceState, normalizeState, viewStateKey, encodeSharedState, readSharedLocation } = await import(pathToFileURL(join(directory, "workspace.mjs")));
 const run = (id, config = {}, source = "local") => ({ run_id: id, name: id, source, started_at: 1, has_scalars: true, last_recorded_at: null, config });
@@ -95,6 +95,28 @@ test("HTTP failures show business messages and FastAPI validation details", asyn
   await assert.rejects(getJson("/api/scalars"), /max_points: Input should be greater than or equal to 2/);
   fetch.mock.mockImplementation(async () => new Response("unavailable", { status: 503 }));
   await assert.rejects(getJson("/api/scalars"), /503/);
+});
+
+test("run list ETag revalidation reuses cached data on 304 and refreshes on change", async (t) => {
+  const fetch = t.mock.method(globalThis, "fetch");
+  const body = JSON.stringify([{ run_id: "run_a", started_at: 1 }]);
+  fetch.mock.mockImplementation(async () => new Response(body, { status: 200, headers: { etag: '"v1"' } }));
+  const first = await fetchRunsWithEtag(null);
+  assert.equal(first.etag, '"v1"');
+  assert.equal(first.data[0].run_id, "run_a");
+  let sentIfNoneMatch = null;
+  fetch.mock.mockImplementation(async (url, init) => {
+    sentIfNoneMatch = init?.headers?.["If-None-Match"] ?? null;
+    return new Response(null, { status: 304, headers: { etag: '"v1"' } });
+  });
+  const unchanged = await fetchRunsWithEtag(first);
+  assert.equal(sentIfNoneMatch, '"v1"');
+  assert.equal(unchanged, first);
+  const nextBody = JSON.stringify([{ run_id: "run_b", started_at: 2 }]);
+  fetch.mock.mockImplementation(async () => new Response(nextBody, { status: 200, headers: { etag: '"v2"' } }));
+  const changed = await fetchRunsWithEtag(first);
+  assert.equal(changed.etag, '"v2"');
+  assert.equal(changed.data[0].run_id, "run_b");
 });
 
 test("progressive subscribers share queued requests and respect the fetch limit", async () => {

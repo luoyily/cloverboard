@@ -82,7 +82,7 @@ export async function pooledResults<T, R>(items: T[], action: (item: T) => Promi
   return results;
 }
 export function fetchRunDetails(runId: string, signal?: AbortSignal): Promise<RunDetails> { return getJson(`/api/run-details?${new URLSearchParams({ run_id: runId })}`, { signal }); }
-export function fetchSources(): Promise<SourceStatus[]> { return getJson("/api/sources"); }
+export function fetchSources(signal?: AbortSignal): Promise<SourceStatus[]> { return getJson("/api/sources", { signal }); }
 export function assetUrl(runId: string, assetId: string, thumbnail = false): string { return `/api/asset?${new URLSearchParams({ run_id: runId, asset_id: assetId, thumbnail: String(thumbnail) })}`; }
 
 export interface ScalarSeries {
@@ -101,23 +101,38 @@ export function seriesKey(runId: string, metric: string): string {
   return `${runId}\u0000${metric}`;
 }
 
+async function responseError(response: Response): Promise<Error> {
+  const payload = await response.json().catch(() => null);
+  const detail = payload?.detail;
+  const validation = Array.isArray(detail) ? detail.flatMap((issue) => {
+    if (typeof issue?.msg !== "string") return [];
+    const field = Array.isArray(issue.loc) ? issue.loc.slice(1).join(".") : "";
+    return [field ? `${field}: ${issue.msg}` : issue.msg];
+  }).join("; ") : "";
+  return new Error(typeof detail === "string" ? detail : validation || `Unable to complete the request (${response.status}).`);
+}
+
 export async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    const detail = payload?.detail;
-    const validation = Array.isArray(detail) ? detail.flatMap((issue) => {
-      if (typeof issue?.msg !== "string") return [];
-      const field = Array.isArray(issue.loc) ? issue.loc.slice(1).join(".") : "";
-      return [field ? `${field}: ${issue.msg}` : issue.msg];
-    }).join("; ") : "";
-    throw new Error(typeof detail === "string" ? detail : validation || `Unable to complete the request (${response.status}).`);
-  }
+  if (!response.ok) throw await responseError(response);
   return (await response.json()) as T;
 }
 
-export function fetchRuns(localOnly = false): Promise<RunSummary[]> {
-  return getJson<RunSummary[]>(localOnly ? "/api/runs?local_only=true" : "/api/runs");
+export function fetchRuns(localOnly = false, signal?: AbortSignal): Promise<RunSummary[]> {
+  return getJson<RunSummary[]>(localOnly ? "/api/runs?local_only=true" : "/api/runs", { signal });
+}
+
+export interface RunsCacheEntry { etag: string; data: RunSummary[] }
+
+/** Fetch the run list with ETag revalidation: an unchanged payload reuses the cached data. */
+export async function fetchRunsWithEtag(cached: RunsCacheEntry | null, localOnly = false, signal?: AbortSignal): Promise<RunsCacheEntry> {
+  const response = await fetch(localOnly ? "/api/runs?local_only=true" : "/api/runs", {
+    headers: cached?.etag ? { "If-None-Match": cached.etag } : {},
+    signal,
+  });
+  if (response.status === 304 && cached) return cached;
+  if (!response.ok) throw await responseError(response);
+  return { etag: response.headers.get("etag") ?? "", data: (await response.json()) as RunSummary[] };
 }
 
 export function fetchMetrics(runId: string, signal?: AbortSignal): Promise<MetricList> {
