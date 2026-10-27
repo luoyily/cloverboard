@@ -18,7 +18,7 @@ import numpy as np
 
 from cloverboard.storage.schema import SCHEMA_VERSION
 
-FIXTURE_VERSION = 5
+FIXTURE_VERSION = 6
 BASE_TIME = 1767225600.0
 PROFILES = {"default": 1000, "stress": 1000}
 
@@ -38,7 +38,7 @@ class PreviewRun:
 
 RUNS = (
     PreviewRun("main", "baseline", "baseline-unet", .001, 170, .065, .91, 10),
-    PreviewRun("main", "lower-lr", "unet-lower-lr", .0005, 210, .035, .95, 13),
+    PreviewRun("main", "lower-lr", "unet-lower-lr-validation-EMA-ablation-seed-43", .0005, 210, .035, .95, 13),
     PreviewRun("local", "trial", "unet-augmented", .0008, 190, .05, .935, 10),
     PreviewRun("peer", "trial", "unet-peer", .0015, 155, .085, .90, 17),
     PreviewRun("main", "partial-75", "unet-partial-75", .0007, 200, .055, .93, 11, .75),

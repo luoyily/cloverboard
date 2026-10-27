@@ -96,6 +96,33 @@ class TargetSettings(BaseModel):
     direction: Literal["gte", "lte"] = "gte"
 
 
+class NamedTarget(TargetSettings):
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    chart_label: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def valid_name(cls, value):
+        if not value.strip():
+            raise ValueError("Target name must not be blank")
+        return value
+
+
+class MetricTargets(BaseModel):
+    items: list[NamedTarget]
+    active_id: str | None = None
+
+    @model_validator(mode="after")
+    def valid_active_target(self):
+        ids = [item.id for item in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Target IDs must be unique within a metric")
+        if self.active_id is not None and self.active_id not in ids:
+            raise ValueError("Active target must belong to the metric")
+        return self
+
+
 class ChartZoom(BaseModel):
     x_min: float = Field(allow_inf_nan=False)
     x_max: float = Field(allow_inf_nan=False)
@@ -276,7 +303,7 @@ class WorkspaceState(BaseModel):
     sort_desc: bool = False
     active_view_id: str | None = None
     baseline_id: str | None = None
-    targets: dict[str, TargetSettings] = Field(default_factory=dict)
+    targets: dict[str, MetricTargets] = Field(default_factory=dict)
     chart_zoom: dict[str, ChartZoom] = Field(default_factory=dict)
     colors: ColorSettings = Field(default_factory=ColorSettings)
 

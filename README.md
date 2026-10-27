@@ -120,6 +120,9 @@ the queue; forcibly killing a process can lose pending records.
 
 ## Browsing
 
+- **Targets** stores multiple named references per metric with one active target.
+  An optional chart label appears beside the left Y axis; Charts and Table share
+  the active threshold, and the `Δ Target` label stays fixed.
 - Run `⋯` → **Edit tags**, or edit from Details → Overview. Use **Edit tags for
   selection** for bulk add/remove. Peer and share tags are read-only; attached
   local source directories remain editable.

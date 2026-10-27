@@ -30,6 +30,22 @@ def test_seeded_metrics_are_reproducible_noisy_and_bounded():
     np.testing.assert_array_equal(before, metric_rng(42, RUNS[0], "validation/score").normal(size=10))
 
 
+def test_preview_named_targets_and_views_are_seeded_once(tmp_path):
+    seed_workspace(tmp_path)
+    store = WorkspaceStore(tmp_path / "data" / "main")
+    snapshot = store.snapshot()
+    targets = snapshot.state.targets["validation/score"]
+    assert snapshot.state.metric_columns == ["train/loss", "validation/score"]
+    assert targets.active_id == "small"
+    assert [(target.name, target.chart_label, target.value) for target in targets.items] == [
+        ("Small model", "S", .9), ("Large model", "L", .95),
+    ]
+    assert all(view.state.targets == snapshot.state.targets for view in snapshot.views)
+    assert len(RUNS[1].name) > 40
+    seed_workspace(tmp_path)
+    assert store.snapshot() == snapshot
+
+
 def test_shared_fixture_uses_sdk_and_reuses_notes_and_views(tmp_path):
     directory = tmp_path / "fixture"
     manifest = prepare_data(directory, "default", 42)

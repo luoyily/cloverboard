@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getJson } from "./api";
-import { defaultColors, type Target, type ChartZoom, type ColorSettings, type TimeDisplay, type DeltaDisplay } from "./features";
+import { defaultColors, type ChartZoom, type ColorSettings, type TimeDisplay, type DeltaDisplay } from "./features";
+import { normalizeTargets, type MetricTargets } from "./targets";
 import { stableValue } from "./comparison";
 import type { ReadoutPlacement } from "./readout";
 import { normalizePalette } from "./palettes";
@@ -51,7 +52,7 @@ export interface WorkspaceState {
   sort_desc: boolean;
   active_view_id: string | null;
   baseline_id: string | null;
-  targets: Record<string, Target>;
+  targets: Record<string, MetricTargets>;
   chart_zoom: Record<string, ChartZoom>;
   colors: ColorSettings;
 }
@@ -149,7 +150,7 @@ export function normalizeState(state: Partial<WorkspaceState>): WorkspaceState {
   if (!["charts", "table", "images"].includes(next.panel)) next.panel = "charts";
   if (typeof next.image_name !== "string") next.image_name = "";
   if (!Number.isSafeInteger(next.image_step)) next.image_step = null;
-  next.targets = Object.fromEntries(Object.entries(state.targets ?? {}).filter(([, t]) => t && finite(t.value) && ["gte", "lte"].includes(t.direction)));
+  next.targets = normalizeTargets(state.targets ?? {});
   next.chart_zoom = Object.fromEntries(Object.entries(state.chart_zoom ?? {}).filter(([, z]) => z && finite(z.x_min) && finite(z.x_max) && z.x_min < z.x_max && ((z.y_min == null && z.y_max == null) || (finite(z.y_min) && finite(z.y_max) && z.y_min < z.y_max))));
   next.baseline_id = typeof state.baseline_id === "string" ? state.baseline_id : null;
   if (!["linear", "log"].includes(next.y_scale)) next.y_scale = "linear";

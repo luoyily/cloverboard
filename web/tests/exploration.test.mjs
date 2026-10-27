@@ -8,7 +8,7 @@ import ts from "typescript";
 
 const directory = await mkdtemp(join(tmpdir(), "cloverboard-tests-"));
 after(() => rm(directory, { recursive: true, force: true }));
-for (const name of ["palettes", "comparison", "features", "chartMath", "colors", "api", "workspace", "readout", "imageTimeline", "dataCache", "runSelection"]) {
+for (const name of ["palettes", "comparison", "features", "targets", "chartMath", "colors", "api", "workspace", "readout", "imageTimeline", "dataCache", "runSelection"]) {
   const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), "utf8");
   let { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
   outputText = outputText.replace(/from "\.\/([^"]+)"/g, 'from "./$1.mjs"').replace('from "react"', `from "${pathToFileURL(resolve("node_modules/react/index.js")).href}"`);
@@ -19,6 +19,7 @@ const palettes = await import(pathToFileURL(join(directory, "palettes.mjs")));
 const builtinPalette = (id) => ({ kind: "builtin", id });
 const customPalette = { kind: "custom", id: "custom:" + "a".repeat(32), name: "Ocean", colors: ["#7ecef4", "#ea68a2", "#ff9a52", "#a2db86"] };
 const feature = await import(pathToFileURL(join(directory, "features.mjs")));
+const targets = await import(pathToFileURL(join(directory, "targets.mjs")));
 const colors = await import(pathToFileURL(join(directory, "colors.mjs")));
 const readout = await import(pathToFileURL(join(directory, "readout.mjs")));
 const { imagesAtStep, sampleSteps } = await import(pathToFileURL(join(directory, "imageTimeline.mjs")));
@@ -27,6 +28,51 @@ const { pooledResults, getJson, fetchRunsWithEtag } = await import(pathToFileURL
 const { BoundedCache, RequestCache } = await import(pathToFileURL(join(directory, "dataCache.mjs")));
 const { defaultWorkspaceState, normalizeState, viewStateKey, encodeSharedState, readSharedLocation } = await import(pathToFileURL(join(directory, "workspace.mjs")));
 const run = (id, config = {}, source = "local") => ({ run_id: id, name: id, source, started_at: 1, has_scalars: true, last_recorded_at: null, config });
+
+test("named targets keep identity separate from names and duplicate values", () => {
+  const small = { id: "small", name: "Small model", chart_label: "S", value: .2, direction: "lte" };
+  const large = { ...small, id: "large", name: "Large model", chart_label: "L" };
+  const first = targets.saveTarget(undefined, small);
+  const group = targets.saveTarget(first, large);
+  assert.equal(group.active_id, "small");
+  assert.deepEqual(group.items, [small, large]);
+  assert.deepEqual(first.items, [small]);
+  const renamed = targets.saveTarget(group, { ...small, name: "Renamed model", chart_label: "R" });
+  assert.equal(renamed.items.length, 2);
+  assert.equal(targets.activeTarget(renamed).id, "small");
+  assert.equal(targets.activeTarget(renamed).value, .2);
+  assert.equal(targets.activeTarget(renamed).chart_label, "R");
+});
+
+test("active targets drive delta and attainment and deletion never selects another target", () => {
+  const small = { id: "small", name: "Small model", chart_label: "S", value: .2, direction: "lte" };
+  const large = { ...small, id: "large", name: "Large model", chart_label: "L", value: .1 };
+  const group = { items: [small, large], active_id: "small" };
+  const point = { step: 10, value: .15 };
+  assert.equal(feature.targetMet(point, targets.activeTarget(group)), true);
+  assert.ok(feature.targetDelta(point, targets.activeTarget(group)) < 0);
+  const switched = { ...group, active_id: "large" };
+  assert.equal(feature.targetMet(point, targets.activeTarget(switched)), false);
+  assert.ok(feature.targetDelta(point, targets.activeTarget(switched)) > 0);
+  assert.equal(targets.removeTarget(group, "large").active_id, "small");
+  const removed = targets.removeTarget(group, "small");
+  assert.deepEqual(removed.items, [large]);
+  assert.equal(targets.activeTarget(removed), undefined);
+  assert.equal(feature.targetDelta(point, targets.activeTarget(removed)), null);
+  assert.equal(targets.saveTarget(removed, small).active_id, null);
+});
+
+test("named targets normalize invalid references and survive shared state without label truncation", () => {
+  const target = { id: "goal", name: "Complete name ".repeat(30), chart_label: "Display ".repeat(40), value: .2, direction: "lte" };
+  const group = { items: [target], active_id: target.id };
+  const state = normalizeState({ targets: { loss: group } });
+  const shared = readSharedLocation(`http://localhost/#state=${encodeSharedState(state)}`).state;
+  assert.deepEqual(shared.targets.loss, group);
+  assert.notEqual(viewStateKey(state), viewStateKey({ ...state, targets: { loss: { ...group, active_id: null } } }));
+  const invalid = targets.normalizeTargets({ loss: { items: [target, { ...target }, { ...target, id: "bad", value: Infinity }], active_id: "bad" } });
+  assert.deepEqual(invalid.loss, { items: [target], active_id: null });
+  assert.deepEqual(targets.normalizeTargets({ loss: { items: [], active_id: null } }), {});
+});
 
 test("tail shortcuts use the whole Step span and keep small/nonzero ranges valid", () => {
   assert.deepEqual(tailStepRange([0, 100], 50), [50, 100]);
@@ -261,7 +307,7 @@ test("tag filters preserve exact membership for any, all, none and empty modes",
 });
 
 test("media and table settings survive views and shared state", () => {
-  const state = normalizeState({ ...defaultWorkspaceState(), panel: "images", media_type: "audio", audio_step: 0, table_decimals: 7, show_tags_column: true, tag_filter: ["reviewed"], tag_filter_match: "all", table_show_steps: false, table_delta: "hidden", baseline_id: "r1", targets: { loss: { value: .2, direction: "lte" } } });
+  const state = normalizeState({ ...defaultWorkspaceState(), panel: "images", media_type: "audio", audio_step: 0, table_decimals: 7, show_tags_column: true, tag_filter: ["reviewed"], tag_filter_match: "all", table_show_steps: false, table_delta: "hidden", baseline_id: "r1", targets: { loss: { items: [{ id: "goal", name: "Training goal", chart_label: "Goal", value: .2, direction: "lte" }], active_id: "goal" } } });
   const shared = readSharedLocation(`http://localhost/#state=${encodeSharedState(state)}`);
   assert.equal(shared.state.media_type, "audio");
   assert.equal(shared.state.audio_step, 0);

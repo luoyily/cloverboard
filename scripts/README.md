@@ -155,6 +155,16 @@ sampling and pagination; it is not a disk-capacity test of unique images.
 
 ## Quick visual checks
 
+- The workspace seeds a training goal and two named validation score targets:
+  Small model (`S`, ≥0.9) and Large model (`L`, ≥0.95). Switch the active target
+  in Targets; the left Y-axis label, Δ Target, attainment and first hit follow it.
+  Editing a chart label changes only its text. Removing the active target leaves
+  none active. Table target cells reuse the same list/editor.
+- The lower-LR Run deliberately has a long name for checking the wider Samples
+  readout and its flexible Run column. Pin and click its row to read the full name.
+- Switch Details → Overview / Notes / Files and check that the title and tabs
+  stay in place while only the content scrolls. Fixture version 6 requires
+  regenerating an existing preview with `--reset`.
 - Train/validation each have three charts; diagnostics has one small chart.
 - Expand/restore a chart. It fills its group's row, preserving order, zoom,
   targets and scale. Reload or reopen a View to check size persistence.

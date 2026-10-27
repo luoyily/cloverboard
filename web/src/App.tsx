@@ -5,6 +5,7 @@ import { applyTheme, loadThemeMode, nextThemeMode, resolveTheme, saveThemeMode, 
 import { defaultMetricColumns, flattenConfig, parameterColumns } from "./comparison";
 import { useWorkspace, type WorkspaceState } from "./workspace";
 import { topRunIds } from "./features";
+import { activeTarget } from "./targets";
 import { recentRunIds, replaceSelection, selectionPatch, sortRuns } from "./runSelection";
 import { useColors } from "./useColors";
 import { useScalarSeries } from "./useScalarSeries";
@@ -79,9 +80,13 @@ export default function App() {
   const seriesRequests = selectedRuns.flatMap((run) => (catalogs.get(run.run_id)?.fields ?? []).filter((field) => !state.collapsed_groups.includes(field.group) && visibleMetricNames.has(field.metric)).map(({ metric }) => ({ runId: run.run_id, metric, stamp: run.last_recorded_at })));
   const { series, loadingMetrics, error: seriesError } = useScalarSeries(selectedRuns.map((run) => run.run_id), seriesRequests, state.smoothing, dataTick, ready && needsSeries);
   const chosenMetrics = useMemo(() => (state.metric_columns ?? defaultMetricColumns(metrics)).filter((name) => metrics.includes(name)), [state.metric_columns, metrics]);
-  const summaryMetrics = state.panel === "table" ? [...chosenMetrics] : state.panel === "charts" ? metrics.filter((metric) => state.targets[metric]) : [];
+  const summaryMetrics = state.panel === "table" ? [...chosenMetrics] : state.panel === "charts" ? metrics.filter((metric) => activeTarget(state.targets[metric])) : [];
   if (state.colors.top_k.enabled && state.colors.top_k.metric && !summaryMetrics.includes(state.colors.top_k.metric)) summaryMetrics.push(state.colors.top_k.metric);
-  const summaryKey = JSON.stringify([selectionKey, summaryMetrics, summaryMetrics.map((metric) => state.targets[metric] ?? null), dataTick, recordedVersion]);
+  const summaryTargets = summaryMetrics.map((metric) => {
+    const target = activeTarget(state.targets[metric]);
+    return target ? [target.value, target.direction] : null;
+  });
+  const summaryKey = JSON.stringify([selectionKey, summaryMetrics, summaryTargets, dataTick, recordedVersion]);
 
   useEffect(() => {
     applyTheme(themeMode);
@@ -174,7 +179,8 @@ export default function App() {
     const controller = new AbortController();
     const requests = selectedRuns.flatMap((run) => summaryMetrics.map((metric) => ({ run, metric })));
     void pooledResults(requests, async ({ run, metric }) => {
-      const target = state.targets[metric], cacheKey = JSON.stringify([run.run_id, metric, target ?? null, dataTick, run.last_recorded_at]);
+      const target = activeTarget(state.targets[metric]);
+      const cacheKey = JSON.stringify([run.run_id, metric, target?.value, target?.direction, dataTick, run.last_recorded_at]);
       const summary = await summaryCache.current.load(cacheKey, () => fetchSummary(run.run_id, metric, target));
       return [seriesKey(run.run_id, metric), summary] as const;
     }, 4, undefined, controller.signal)

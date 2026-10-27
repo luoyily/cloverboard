@@ -994,8 +994,8 @@ select.text-input option, select.text-input optgroup { background: var(--surface
 .interactive-chart:focus:not(:focus-visible) { outline: none; }
 .interactive-chart:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .target-line line { stroke: var(--target-line); stroke-width: 1.5; stroke-dasharray: 6 4; }
-.target-line rect { fill: var(--surface); stroke: var(--border); stroke-width: 1; }
-.target-line text { fill: var(--target-text); font-size: 12px; font-weight: 500; }
+.target-axis-label { fill: var(--target-text); font-size: 11px; font-weight: 500; }
+.target-axis-name { font-size: 10px; }
 .first-hit-text { fill: var(--text-muted); font-size: 10px; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
 .target-edge { position: absolute; top: 42px; right: 22px; z-index: 1; padding: 1px 4px; border: 0; background: var(--surface); color: var(--target-text); font-size: 12px; cursor: pointer; }
 .hover-line { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 2 3; opacity: .6; }
@@ -1048,21 +1048,25 @@ select.text-input option, select.text-input optgroup { background: var(--surface
 .run-details-dialog, .image-lightbox { width: min(680px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); color: var(--text); box-shadow: var(--popover-shadow); }
 .run-details-dialog::backdrop, .image-lightbox::backdrop { background: #151e2b50; }
 .run-details-dialog .dialog-title, .image-lightbox .dialog-title { position: sticky; top: -12px; padding-top: 8px; z-index: 2; background: var(--surface); }
+.run-details-dialog { margin: max(16px, 8dvh) auto 0; min-height: min(440px, calc(92dvh - 16px)); max-height: calc(100dvh - max(16px, 8dvh) - 16px); overflow: hidden; }
+.run-details-dialog[open] { display: flex; flex-direction: column; }
+.run-details-dialog .dialog-title { position: static; flex: none; }
+.run-detail-panel { min-height: 0; overflow: auto; flex: 1; scrollbar-gutter: stable; }
 .line-tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--border); }
 .line-tabs > button { position: relative; padding: 10px 0; border: 0; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .line-tabs > button[aria-selected="true"] { color: var(--text); font-weight: 500; }
 .line-tabs > button[aria-selected="true"]::after { content: ""; position: absolute; height: 2px; bottom: -1px; left: 0; right: 0; background: var(--accent); }
 .line-tabs > button:hover { color: var(--text); }
-.run-detail-tabs { margin: 0 8px 14px; }
+.run-detail-tabs { flex: none; margin: 0 8px 14px; }
 .run-detail-body { padding: 0 8px 12px; font-size: 12px; }
 .run-detail-body dl { display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 6px; }
 .run-detail-body dt { color: var(--text-muted); }
 .run-detail-body dd { margin: 0; overflow-wrap: anywhere; }
 .run-detail-body h3 { font-size: 12px; font-weight: 500; margin-top: 20px; }
-.run-detail-body pre { max-height: 220px; overflow: auto; padding: 10px; border: 1px solid var(--border); border-radius: 2px; background: var(--hover); font-size: 11px; line-height: 17px; }
+.run-detail-body pre { overflow: auto; padding: 10px; border: 1px solid var(--border); border-radius: 2px; background: var(--hover); font-size: 11px; line-height: 17px; }
 .snapshot-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .snapshot-root { overflow-wrap: anywhere; color: var(--text-muted); font-size: 11px; }
-.snapshot-files { list-style: none; padding: 0; max-height: 270px; overflow: auto; }
+.snapshot-files { list-style: none; padding: 0; }
 .snapshot-files li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--border); }
 .snapshot-files li > span { overflow-wrap: anywhere; }
 .snapshot-files small { white-space: nowrap; color: var(--text-muted); }
@@ -1192,9 +1196,19 @@ select.text-input option, select.text-input optgroup { background: var(--surface
 .sidebar-resize:hover, .sidebar-resize:focus-visible { background: color-mix(in srgb, var(--accent) 25%, transparent); outline: none; }
 .chart-density-compact .metric-group-charts { grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 10px; }
 .target-metric-choice { display: grid; gap: 4px; color: var(--text-muted); font-size: 12px; padding: 6px 8px; }
-.targets-menu .menu-popover, .metric-menu .menu-popover { width: min(var(--popover-wide), calc(100vw - 24px)); }
-.configured-targets .menu-item { gap: 12px; justify-content: space-between; }
-.configured-targets .menu-item span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.targets-menu .menu-popover, .target-cell-menu .menu-popover, .metric-menu .menu-popover { width: min(var(--popover-wide), calc(100vw - 24px)); }
+.targets-menu .menu-popover, .target-cell-menu .menu-popover { max-height: calc(100dvh - 24px); overflow: auto; }
+.target-list-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px; }
+.target-list-heading .text-button { font-size: 12px; }
+.target-list-row { display: flex; align-items: center; gap: 4px; padding-right: 4px; }
+.target-choice { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; padding: 7px 8px; font-size: 12px; cursor: pointer; }
+.target-choice:hover { background: var(--hover); }
+.target-choice input { flex: none; margin: 0; accent-color: var(--accent); }
+.target-choice > span { min-width: 0; overflow-wrap: anywhere; }
+.target-choice small { flex: none; margin-left: auto; color: var(--text-muted); font-size: 11px; }
+.metric-targets-editor .target-editor { margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--border); }
+.target-editor .setting-row > .text-input { width: 100%; }
+.target-editor .field-help { margin: -4px 0 0; }
 .target-reference-label { display: inline-flex; align-items: center; gap: 8px; }
 .target-reference-label small { font-size: 10px; color: var(--text-muted); font-weight: 400; }
 .compare-table .table-target-row > * { position: sticky; top: var(--table-header-height); z-index: 3; height: 48px; background: var(--sidebar); border-bottom: 1px solid var(--border); }

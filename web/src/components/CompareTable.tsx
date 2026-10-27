@@ -4,6 +4,7 @@ import { seriesKey, type RunSummary, type ScalarSummary } from "../api";
 import { displayParameter, formatMetric as formatRecordedMetric, runLabel, stableValue, type ParameterColumn } from "../comparison";
 import type { WorkspaceState } from "../workspace";
 import { baselineDelta, deltaColumns, targetDelta, targetMet } from "../features";
+import { activeTarget } from "../targets";
 import { TargetCell } from "./TargetsMenu";
 import { formatTableTime, formatWallTime } from "../readout";
 import RunActions from "./RunActions";
@@ -33,7 +34,7 @@ export default function CompareTable({ runs, configs, params, metrics, summaries
     (!state.differences_only || param.different || runs.length < 2));
   const timeKey = state.table_time === "hidden" ? null : state.table_time;
   const timeColumn = timeKey !== null;
-  const hasTargetRow = metrics.some((metric) => state.targets[metric]);
+  const hasTargetRow = metrics.some((metric) => state.targets[metric]?.items.length);
   const differences = deltaColumns(state.table_delta, Boolean(state.baseline_id), true);
   const columns = ["run", ...(timeKey ? [timeKey] : []), ...metrics.map((name) => `metric:${name}`), ...visibleParams.map((param) => `param:${param.key}`)];
   const sortColumn = columns.includes(state.sort_column) ? state.sort_column : "run";
@@ -82,7 +83,7 @@ export default function CompareTable({ runs, configs, params, metrics, summaries
           {hasTargetRow && <tr className="table-target-row" aria-label="Target reference values">
             <th scope="row" className="identity-column"><span className="target-reference-label"><TargetIcon size={16} />Target <small>Reference</small></span></th>
             {timeColumn && <td>—</td>}{state.show_tags_column && <td>—</td>}
-            {metrics.map((metric) => <td key={metric}><TargetCell metric={metric} target={state.targets[metric]} decimals={state.table_decimals} onChange={(target) => { const targets = { ...state.targets }; if (target) targets[metric] = target; else delete targets[metric]; onChange({ targets }); }} /></td>)}
+            {metrics.map((metric) => <td key={metric}><TargetCell metric={metric} group={state.targets[metric]} decimals={state.table_decimals} onChange={(group) => { const targets = { ...state.targets }; if (group.items.length) targets[metric] = group; else delete targets[metric]; onChange({ targets }); }} /></td>)}
             {visibleParams.map((param) => <td key={param.key}>—</td>)}
           </tr>}
           {sortedRuns.map((run) => <tr key={run.run_id} className={`${run.run_id === state.baseline_id ? "table-baseline-row " : ""}${focusedId === run.run_id ? "run-focused" : ""}${topIds && !topIds.has(run.run_id) && state.baseline_id !== run.run_id ? " ranked-muted" : ""}`} onPointerEnter={() => onFocusRun(run.run_id)} onPointerLeave={() => onFocusRun(null)} onFocus={() => onFocusRun(run.run_id)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) onFocusRun(null); }}>
@@ -99,7 +100,7 @@ export default function CompareTable({ runs, configs, params, metrics, summaries
             const summary = summaries.get(seriesKey(run.run_id, metric)), point = summary?.latest;
             const base = state.baseline_id ? summaries.get(seriesKey(state.baseline_id, metric))?.latest : undefined;
             const delta = run.run_id === state.baseline_id ? null : baselineDelta(point, base);
-            const target = state.targets[metric], met = target ? targetMet(point, target) : null;
+            const target = activeTarget(state.targets[metric]), met = target ? targetMet(point, target) : null;
             const targetDifference = target ? targetDelta(point, target) : null;
             const direction = target?.direction;
             const improved = delta !== null && delta !== 0 && direction ? (direction === "lte" ? delta < 0 : delta > 0) : false;

@@ -112,6 +112,8 @@ Audio 接受 `[-1, 1]` 范围内的 float NumPy 数组、int16 数组或 PCM16 W
 
 ## 浏览
 
+- **Targets** 支持每个指标保存多个命名目标，每次激活一个。可选的图表短名显示在
+  左侧 Y 轴；Charts 和 Table 共用激活目标，`Δ Target` 文案保持固定。
 - 通过 Run 的 `⋯` → **Edit tags**，或在 Details → Overview 中编辑。批量增删使用
   **Edit tags for selection**。Peer 和分享模式下的 Tags 只读；附加的本地来源目录
   仍可编辑。

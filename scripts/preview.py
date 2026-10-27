@@ -95,7 +95,16 @@ def seed_workspace(directory: Path):
     state = WorkspaceState(
         selected_ids=["baseline", "lower-lr", "partial-75", qualify("folder", "trial"), qualify("peer", "trial")],
         refresh_interval=0, collapsed_groups=["diagnostics", "optimizer"], baseline_id="baseline",
-        targets={"train/loss": {"value": .1, "direction": "lte"}, "validation/score": {"value": .9, "direction": "gte"}},
+        metric_columns=["train/loss", "validation/score"],
+        targets={
+            "train/loss": {"items": [
+                {"id": "goal", "name": "Training goal", "chart_label": "Goal", "value": .1, "direction": "lte"},
+            ], "active_id": "goal"},
+            "validation/score": {"items": [
+                {"id": "small", "name": "Small model", "chart_label": "S", "value": .9, "direction": "gte"},
+                {"id": "large", "name": "Large model", "chart_label": "L", "value": .95, "direction": "gte"},
+            ], "active_id": "small"},
+        },
     )
     view = store.save_view(SavedViewInput(name="Training overview", state=state))
     detail = state.model_copy(update={"collapsed_groups": ["diagnostics", "optimizer", "train"], "expanded_charts": ["validation/score"]})

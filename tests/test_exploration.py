@@ -9,6 +9,10 @@ from cloverboard.storage.protocols import RunMeta, ScalarRecord
 from cloverboard.storage.sqlite_backend import SqliteStorageReader, SqliteStorageWriter
 
 
+def _loss_targets(value=.2):
+    return {"items": [{"id": "goal", "name": "Training goal", "chart_label": "Goal", "value": value, "direction": "lte"}], "active_id": "goal"}
+
+
 def _history(tmp_path):
     directory = tmp_path / "r1"
     directory.mkdir()
@@ -160,7 +164,7 @@ def test_view_list_and_comparison_preferences_roundtrip(tmp_path):
     client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
     state = {
         "selected_ids": ["r1"], "baseline_id": "r1", "search": "SRx[24]", "search_regex": True, "run_sort": "name_desc",
-        "targets": {"loss": {"value": 0.2, "direction": "lte"}},
+        "targets": {"loss": _loss_targets()},
         "chart_zoom": {"loss": {"x_min": 10, "x_max": 40, "y_min": 0, "y_max": 1}},
         "tooltip_time": "elapsed", "tooltip_delta": "both", "chart_warmup": {"loss": 10},
         "colors": {"mode": "continuous", "field": "optimizer.lr", "domain": [0.0001, 0.1], "overrides": {"r1": "#3276b8"}},
@@ -206,7 +210,7 @@ def test_explicit_delta_preferences_survive_workspace_and_view_restore(tmp_path,
     state = {
         "tooltip_delta": mode, "refresh_interval": 30, "table_delta": mode,
         "table_show_steps": False,
-        "baseline_id": "r1", "targets": {"loss": {"value": .2, "direction": "lte"}},
+        "baseline_id": "r1", "targets": {"loss": _loss_targets()},
     }
     assert client.put("/api/workspace/state", json={"state": state, "saved_at": 10}).status_code == 200
     assert client.post("/api/workspace/views", json={"name": "Delta", "state": state}).status_code == 201
@@ -220,9 +224,39 @@ def test_explicit_delta_preferences_survive_workspace_and_view_restore(tmp_path,
             assert settings[key] == state[key]
 
 
+def test_named_targets_roundtrip_with_duplicate_values_and_optional_active_target(tmp_path):
+    group = _loss_targets()
+    group["items"].append({"id": "other", "name": "Large model", "chart_label": "L" * 300, "value": .2, "direction": "lte"})
+    group["active_id"] = "other"
+    client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
+    state = {"targets": {"loss": group}}
+    assert client.put("/api/workspace/state", json={"state": state, "saved_at": 10}).status_code == 200
+    assert client.post("/api/workspace/views", json={"name": "Targets", "state": state}).status_code == 201
+    restored = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1").get("/api/workspace").json()
+    assert restored["state"]["targets"] == state["targets"]
+    assert restored["views"][0]["state"]["targets"] == state["targets"]
+    group["active_id"] = None
+    assert client.put("/api/workspace/state", json={"state": state, "saved_at": 20}).json()["state"]["targets"] == state["targets"]
+
+
+@pytest.mark.parametrize("invalid", ["duplicate_id", "missing_active", "blank_name", "nonfinite"])
+def test_invalid_named_targets_are_rejected(tmp_path, invalid):
+    group = _loss_targets()
+    if invalid == "duplicate_id":
+        group["items"].append(dict(group["items"][0]))
+    elif invalid == "missing_active":
+        group["active_id"] = "missing"
+    elif invalid == "blank_name":
+        group["items"][0]["name"] = "   "
+    else:
+        group["items"][0]["value"] = "inf"
+    client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
+    assert client.put("/api/workspace/state", json={"state": {"targets": {"loss": group}}, "saved_at": 10}).status_code == 422
+
+
 @pytest.mark.parametrize("patch", [
     {"run_sort": "wrong"},
-    {"targets": {"loss": {"value": "nan"}}},
+    {"targets": {"loss": _loss_targets("nan")}},
     {"chart_zoom": {"loss": {"x_min": 30, "x_max": 10}}},
     {"colors": {"domain": [1, 0]}}, {"colors": {"overrides": {"r1": "red"}}},
     {"colors": {"palette": "unknown"}},

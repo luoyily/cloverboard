@@ -5,6 +5,7 @@ import type { MetricSeries, SeriesSnapshot } from "../scalarSeries";
 import { CaretDownIcon, CaretRightIcon } from "@phosphor-icons/react";
 import MetricChart from "./MetricChart";
 import { effectiveWarmup } from "../features";
+import { activeTarget } from "../targets";
 
 const EMPTY_SERIES: MetricSeries = new Map();
 
@@ -49,7 +50,7 @@ export default function ChartGrid({ metrics, loadingMetrics, dataTick, runs, ser
           tooltipDecimals={state.tooltip_decimals} tooltipSort={state.tooltip_sort} timeDisplay={state.tooltip_time} deltaDisplay={state.tooltip_delta}
           showLegend={state.show_chart_legend} tooltipPlacement={state.tooltip_placement} onLocateRun={onLocateRun}
           warmupStep={effectiveWarmup(state.chart_warmup[metric], state.y_warmup)} warmupOverride={state.chart_warmup[metric]} globalWarmup={state.y_warmup}
-          summaries={summaries} target={state.targets[metric]} baselineId={state.baseline_id} zoom={state.chart_zoom[metric]}
+          summaries={summaries} target={activeTarget(state.targets[metric])} baselineId={state.baseline_id} zoom={state.chart_zoom[metric]}
           focusedId={focusedId} onFocusRun={onFocusRun} topIds={topIds}
         />)}</div>}
       </section>;
