@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="generate an access token and force read-only mode",
     )
-    serve.add_argument("--peers", default="", help="comma-separated NAME=http://host:port sources; loopback is supported")
+    serve.add_argument("--peers", default="", help="comma-separated [NAME=]host:port[?token=TOKEN] sources; HTTP(S) URLs are supported")
     serve.add_argument("--source", action="append", default=[], help="additional local NAME=LOGDIR (repeatable)")
     serve.add_argument("--sources", help="TOML source configuration; fixed keys preserve identity across URL changes")
     from cloverboard.importers.tensorboard.cli import add_parser

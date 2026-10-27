@@ -28,6 +28,18 @@ cloverboard serve --logdir ./runs
 UI 和只读 MCP Streamable HTTP 端点（`/mcp`）会一起启动。
 可复现数据集和三来源预览见 [scripts/README.md](scripts/README.md)。
 
+要聚合另一台实验机的日志，先在实验机运行
+`cloverboard serve --logdir ./runs --host 0.0.0.0 --share`，再将地址和打印的
+Token 直接传给本地服务：
+
+```sh
+cloverboard serve --peers "10.0.0.12:7230?token=TOKEN"
+```
+
+支持完整 HTTP(S) 地址和可选的来源名（`gpu1=10.0.0.12:7230?token=TOKEN`），
+多个 Peer 用逗号分隔。Token 会从地址中提取，通过 Bearer 认证头发送。
+分享服务重启后会生成新 Token，需要同步更新本地参数。
+
 安装 `dev` extra 后运行 `python -m build` 可以构建 wheel 和源码包。构建过程使用
 `npm ci`，并基于锁定依赖构建 WebUI。两种产物都输出到 `dist/`；从源码构建需要
 Node.js，安装 wheel 则不需要。本地日志、预览数据和导入的 TensorBoard 数据不会

@@ -25,6 +25,19 @@ cloverboard serve --logdir ./runs
 The UI and read-only MCP Streamable HTTP endpoint (`/mcp`) start together.
 For a reproducible dataset and three-source preview, see [scripts/README.md](scripts/README.md).
 
+To read experiments from another machine, start its server with
+`cloverboard serve --logdir ./runs --host 0.0.0.0 --share`, then pass its address
+and printed token directly to the local server:
+
+```sh
+cloverboard serve --peers "10.0.0.12:7230?token=TOKEN"
+```
+
+HTTP(S) URLs and optional source names (`gpu1=10.0.0.12:7230?token=TOKEN`)
+are supported; separate multiple peers with commas. Tokens are extracted from
+the URLs and sent as Bearer headers. Restarting the shared server generates a
+new token, which must be updated on the local server.
+
 To build a wheel and source archive, run `python -m build` after installing the
 `dev` extra. The build uses `npm ci` and builds the WebUI from the locked
 dependencies. Both outputs go into `dist/`; building from source requires

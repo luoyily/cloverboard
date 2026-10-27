@@ -14,6 +14,17 @@ def test_serve_defaults():
     assert args.peers == ""
 
 
+def test_serve_accepts_peer_share_url(monkeypatch, tmp_path):
+    from cloverboard.cli import main
+
+    applications = []
+    monkeypatch.setattr("uvicorn.run", lambda app, **options: applications.append(app))
+    main(["serve", "--logdir", str(tmp_path), "--peers", "10.0.0.12:7230?token=secret"])
+    source, = applications[0].state.reader.sources.values()
+    assert source.url == "http://10.0.0.12:7230"
+    assert source.token == "secret"
+
+
 def test_optional_tensorboard_dependency_is_not_loaded_by_sdk_or_cli(tmp_path):
     import subprocess
     import sys

@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 from threading import Lock
 import tomllib
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import httpx
 
@@ -62,6 +62,27 @@ def split_run_id(run_id: str) -> tuple[str, str]:
     return key, original
 
 
+def _parse_source_url(value: str) -> tuple[str, str | None]:
+    url = value.strip()
+    if "://" not in url:
+        url = "http://" + url
+    try:
+        parsed = urlsplit(url)
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None or parsed.fragment):
+            raise ValueError
+        parsed.port  # Validate the port before a peer is used.
+        query = parse_qsl(parsed.query, keep_blank_values=True, strict_parsing=True)
+    except ValueError:
+        raise ValueError("Use an HTTP(S) source URL with an optional ?token=TOKEN and no embedded credentials or fragment") from None
+    if len(query) > 1 or (query and (query[0][0] != "token" or not query[0][1])):
+        raise ValueError("Source URLs accept only one non-empty token query parameter")
+    token = query[0][1] if query else None
+    if token and any(ord(char) < 32 or ord(char) == 127 for char in token):
+        raise ValueError("Source tokens cannot contain control characters")
+    return parsed._replace(path=parsed.path.rstrip("/"), query="").geturl(), token
+
+
 def load_sources(peers: str = "", local_sources=(), config=None) -> list[Source]:
     items = []
     base = Path.cwd()
@@ -76,31 +97,29 @@ def load_sources(peers: str = "", local_sources=(), config=None) -> list[Source]
             raise ValueError("Use --source NAME=PATH")
         items.append((key, {"logdir": str(Path(path).resolve())}))
     for item in filter(None, (value.strip() for value in peers.split(","))):
-        if "=" in item:
-            key, url = item.split("=", 1)
-        else:
-            url = item
-            key = "peer-" + hashlib.sha256(url.encode()).hexdigest()[:10]
+        name, separator, address = item.partition("=")
+        named = bool(separator and _SOURCE_ID.fullmatch(name))
+        key, url = (name, address) if named else (None, item)
         items.append((key, {"url": url}))
     sources = []
     seen = {"local"}
     for key, item in items:
+        if ("url" in item) == ("logdir" in item):
+            raise ValueError("Each source needs exactly one url or logdir")
+        if "url" in item:
+            url, url_token = _parse_source_url(str(item["url"]))
+            if key is None:
+                key = "peer-" + hashlib.sha256(url.encode()).hexdigest()[:10]
         if not _SOURCE_ID.fullmatch(key) or key in seen:
             raise ValueError("Source names must be unique letters, digits, underscores or hyphens; local is reserved")
         seen.add(key)
-        if ("url" in item) == ("logdir" in item):
-            raise ValueError("Each source needs exactly one url or logdir")
         label = str(item.get("label", key))
         if "logdir" in item:
             sources.append(Source(key, label, reader=SqliteStorageReader(base / item["logdir"])))
             continue
-        url = str(item["url"]).rstrip("/")
-        if "://" not in url:
-            url = "http://" + url
-        parsed = urlsplit(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError("Use an HTTP(S) source URL without embedded credentials or query parameters")
-        token = item.get("token")
+        if url_token is not None and ("token" in item or "token_env" in item):
+            raise ValueError(f"Specify the token only once for source {key}")
+        token = url_token if url_token is not None else item.get("token")
         if item.get("token_env"):
             token = os.environ.get(item["token_env"])
             if not token:

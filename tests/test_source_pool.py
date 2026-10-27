@@ -7,7 +7,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from cloverboard.server.app import create_app
-from cloverboard.server.sources import Source, SourceReader
+from cloverboard.server.sources import Source, SourceReader, load_sources
 from tests.fakes import FakeStorageReader
 
 
@@ -18,6 +18,7 @@ def test_concurrent_peer_requests_share_client_without_sharing_credentials(monke
     clients, seen = [], []
 
     def respond(request):
+        assert "token" not in request.url.params
         seen.append((request.url.host, request.headers.get("authorization"), request.url.params["local_only"]))
         return httpx.Response(200, json=[])
 
@@ -29,7 +30,7 @@ def test_concurrent_peer_requests_share_client_without_sharing_credentials(monke
         return client
 
     monkeypatch.setattr(module, "httpx", SimpleNamespace(Client=make_client, HTTPError=httpx.HTTPError))
-    sources = [Source("a", "A", url="https://a.test", token="a-secret"), Source("b", "B", url="https://b.test")]
+    sources = load_sources("a=https://a.test/?token=a-secret,b=https://b.test")
     reader = SourceReader(None, sources)
     try:
         with ThreadPoolExecutor(max_workers=8) as pool:
