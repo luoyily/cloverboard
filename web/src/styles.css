@@ -500,6 +500,12 @@ button:disabled { cursor: default; opacity: 0.45; }
 .chart-grid { display: flex; flex-direction: column; gap: 16px; }
 .metric-group { min-width: 0; }
 .metric-group-heading { display: flex; align-items: center; gap: 6px; width: 100%; margin: 0 0 8px; padding: 3px 0; border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 500; text-align: left; cursor: pointer; }
+.metric-group-heading::after { content: ""; flex: 1; min-width: 24px; height: 1px; margin-left: 6px; background: var(--border); }
+.metric-group-heading:hover::after { background: var(--input-border); }
+.metric-group-heading:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.metric-group-heading > svg { flex: none; color: var(--text-muted); }
+.metric-group-name { min-width: 0; overflow-wrap: anywhere; }
+.metric-group-count { flex: none; color: var(--text-muted); font-size: 12px; font-weight: 400; }
 .metric-group-charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 14px; container-type: inline-size; }
 .chart-expanded { grid-column: 1 / -1; }
 @container (max-width: 773px) { .chart-expand-button { display: none; } }

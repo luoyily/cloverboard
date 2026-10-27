@@ -41,7 +41,12 @@ export default function ChartGrid({ metrics, loadingMetrics, dataTick, runs, ser
       const collapsed = state.collapsed_groups.includes(group);
       const Icon = collapsed ? CaretRightIcon : CaretDownIcon;
       return <section className="metric-group" key={group} aria-label={group}>
-        <button className="metric-group-heading" aria-expanded={!collapsed} onClick={() => onChange((current) => ({ collapsed_groups: current.collapsed_groups.includes(group) ? current.collapsed_groups.filter((item) => item !== group) : [...current.collapsed_groups, group] }))}><Icon size={13} /><span>{group}</span></button>
+        <button type="button" className="metric-group-heading" aria-label={`${group}, ${fields.length} ${fields.length === 1 ? "metric" : "metrics"}`} aria-expanded={!collapsed}
+          onClick={() => onChange((current) => ({ collapsed_groups: current.collapsed_groups.includes(group) ? current.collapsed_groups.filter((item) => item !== group) : [...current.collapsed_groups, group] }))}>
+          <Icon size={13} aria-hidden="true" />
+          <span className="metric-group-name">{group}</span>
+          <span className="metric-group-count" aria-hidden="true">({fields.length})</span>
+        </button>
         {!collapsed && <div className="metric-group-charts">{fields.map(({ metric, name }) => <MetricChart key={metric}
           metric={metric} title={name} loading={loadingMetrics.has(metric)} dataTick={dataTick} runs={runs} series={series.get(metric) ?? EMPTY_SERIES} colors={colors} smoothing={smoothing}
           expanded={state.expanded_charts.includes(metric)}
