@@ -251,6 +251,19 @@ test("readouts fall back above, across orientations, and within viewport bounds"
   }
 });
 
+test("readouts place content-sized and viewport-wide popups within the viewport", () => {
+  const anchor = { left: 920, right: 1320, top: 100, bottom: 380 };
+  const viewport = { width: 1440, height: 900 };
+  for (const width of [480, 1000, 1416]) {
+    for (const preference of ["vertical", "horizontal"]) {
+      const placed = readout.placeReadout(anchor, { width, height: 210 }, viewport, preference);
+      assert.ok(placed.left >= 12);
+      assert.ok(placed.left + width <= viewport.width - 12);
+      assert.ok(placed.top >= 12 && placed.top + 210 <= viewport.height - 12);
+    }
+  }
+});
+
 test("chart legend and hover placement settings support defaults and shared state", () => {
   const defaults = normalizeState({});
   assert.equal(defaults.show_chart_legend, true);
