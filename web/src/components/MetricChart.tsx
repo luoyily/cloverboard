@@ -15,7 +15,7 @@ import FloatingReadout from "./FloatingReadout";
 import ChartLegend from "./ChartLegend";
 
 // Leave room for the target name even when its value reaches the top of the Y range.
-const HEIGHT = 224, TOP = 22, BOTTOM = 22, RIGHT = 18;
+const HEIGHT = 256, TOP = 22, BOTTOM = 22, RIGHT = 18;
 
 function formatReadout(value: number | null | undefined, decimals: number): string {
   if (value == null || !Number.isFinite(value)) return "—";

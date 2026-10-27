@@ -24,7 +24,7 @@
   --topbar: #ffffff;
   --border: #dfe3e8;
   --input-border: #b6bfca;
-  --grid: #eef0f3;
+  --grid: #e6e9ee;
   --axis: #ccd3dc;
   --target-line: #526b85;
   --target-text: #3c536b;
@@ -39,6 +39,7 @@
   --radius: 2px;
   --popover-width: 320px;
   --popover-wide: 360px;
+  --workspace-header-height: 56px;
   --font-ui: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
@@ -146,7 +147,7 @@ code {
   flex: none;
   align-items: center;
   gap: 8px;
-  height: 48px;
+  height: var(--workspace-header-height);
   padding: 0 18px;
   border-bottom: 1px solid var(--border);
   background: var(--topbar);
@@ -347,7 +348,7 @@ code {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 48px;
+  min-height: var(--workspace-header-height);
   height: auto;
   flex-wrap: wrap;
   padding: 0 20px;
@@ -366,7 +367,7 @@ code {
   align-items: center;
   gap: 16px;
   min-width: 0;
-  min-height: 47px;
+  min-height: calc(var(--workspace-header-height) - 1px);
 }
 
 .toolbar-left { flex: 1; }
@@ -374,6 +375,7 @@ code {
 .workspace-tabs { display: flex; align-self: stretch; gap: 16px; flex: none; }
 .workspace-tabs button {
   position: relative;
+  min-width: 48px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -784,7 +786,6 @@ select.text-input option, select.text-input optgroup { background: var(--surface
     border-bottom: 1px solid var(--border);
   }
   .sidebar-brand {
-    height: 48px;
     padding: 0 16px;
   }
   .sidebar-content {
@@ -813,7 +814,6 @@ select.text-input option, select.text-input optgroup { background: var(--surface
     width: 8px;
   }
   .topbar {
-    min-height: 48px;
     height: auto;
     gap: 0;
     padding: 0 14px;
