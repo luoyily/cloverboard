@@ -1049,7 +1049,6 @@ select.text-input option, select.text-input optgroup { background: var(--surface
 .run-source { display: block; max-width: 100%; }
 .run-name-primary .baseline-mark { flex: none; }
 .run-source { font-size: 9px; line-height: 12px; color: var(--text-muted); }
-.source-offline { opacity: .7; }
 .run-actions-menu { flex: none; }
 .run-actions-menu > .popover-trigger { width: 28px; height: 28px; padding: 0; }
 .run-actions-menu .menu-popover { width: 226px; }

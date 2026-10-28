@@ -8,7 +8,7 @@ import ts from "typescript";
 
 const directory = await mkdtemp(join(tmpdir(), "cloverboard-viewing-"));
 after(() => rm(directory, { recursive: true, force: true }));
-for (const name of ["palettes", "comparison", "features", "targets", "workspace", "viewingConfig", "workspaceSession", "theme"]) {
+for (const name of ["palettes", "comparison", "features", "targets", "workspace", "viewingConfig", "workspaceSession", "theme", "runSelection"]) {
   const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), "utf8");
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
   await writeFile(join(directory, `${name}.mjs`), outputText.replace(/from "\.\/([^"]+)"/g, 'from "./$1.mjs"'));
@@ -17,6 +17,7 @@ const configModule = await import(pathToFileURL(join(directory, "viewingConfig.m
 const workspace = await import(pathToFileURL(join(directory, "workspace.mjs")));
 const theme = await import(pathToFileURL(join(directory, "theme.mjs")));
 const { WorkspaceSession } = await import(pathToFileURL(join(directory, "workspaceSession.mjs")));
+const { availableSelection, reconcileSelection } = await import(pathToFileURL(join(directory, "runSelection.mjs")));
 const base = () => configModule.initialConfig(null);
 function library() {
   const { config, palette } = configModule.saveLocalPalette(base(), { name: "Ocean", colors: ["#3276b8", "#267f6c"] });
@@ -393,5 +394,59 @@ test("saving a palette only changes its library in either mode", async t => {
     await session.savePalette({ name: "Ocean", colors: ["#123456", "#abcdef"] });
     assert.deepEqual(session.getSnapshot().state, before);
     assert.equal(session.getConfig().palettes[0].name, "Ocean");
+  }
+});
+
+for (const mode of ["remote", "local", "readonly"]) test(`${mode}: confirmed run cleanup saves current settings without rewriting Views or palettes`, async t => {
+  const f = sessionFixture(t, mode !== "readonly"), { session } = f;
+  const selected = ["gpu:gone", "offline:kept", "present"];
+  const original = workspace.normalizeState({
+    selected_ids: selected, baseline_id: "gpu:gone", active_view_id: "a".repeat(32),
+    colors: { ...workspace.defaultWorkspaceState().colors, runs: { "gpu:gone": { color: "#abcdef", fixed: true } } },
+  });
+  f.remote.state = original;
+  f.remote.views.push({ view_id: "a".repeat(32), name: "Saved comparison", state: { ...structuredClone(original), active_view_id: null } });
+  f.palettes.push({ id: "custom:" + "b".repeat(32), name: "Ocean", colors: ["#abcdef", "#3276b8"] });
+  await session.load("http://localhost/");
+  if (mode === "local") await session.setMode("local");
+  const before = structuredClone(session.getConfig());
+  const present = { run_id: "present", source: "local", started_at: 1, has_scalars: true };
+  const catalog = {
+    runs: [present],
+    sources: [
+      { source_id: "local", label: "Local", kind: "local", online: true },
+      { source_id: "gpu", label: "GPU", kind: "peer", online: false },
+      { source_id: "offline", label: "Offline", kind: "peer", online: false },
+    ],
+  };
+
+  // A failed source is hidden, but cannot erase saved remote or browser choices.
+  assert.equal(availableSelection(session.getSnapshot().state, catalog.runs).size, 1);
+  assert.equal(reconcileSelection(session.getSnapshot().state, catalog), null);
+  await session.flushRemote();
+  assert.deepEqual(f.writes, []);
+
+  catalog.sources[1].online = true;
+  const patch = reconcileSelection(session.getSnapshot().state, catalog);
+  assert.deepEqual(patch, { selected_ids: ["offline:kept", "present"], baseline_id: null });
+  session.update(patch);
+  await session.flushRemote();
+  const current = session.getConfig();
+  assert.deepEqual(current.state.selected_ids, ["offline:kept", "present"]);
+  assert.equal(current.state.baseline_id, null);
+  assert.deepEqual(current.state.colors, before.state.colors);
+  assert.deepEqual(current.views, before.views);
+  assert.deepEqual(current.palettes, before.palettes);
+  assert.equal(reconcileSelection(current.state, catalog), null);
+  if (mode === "remote") {
+    assert.equal(f.writes.length, 1);
+    assert.equal(f.writes[0].url, "/api/workspace/state");
+    assert.deepEqual(f.remote.state, current.state);
+    assert.deepEqual(f.remote.views, before.views);
+  } else {
+    assert.deepEqual(f.writes, []);
+    assert.deepEqual(f.remote.state, original);
+    const stored = configModule.readLocalConfig(f.storage, configModule.localConfigKey("workspace-a"));
+    assert.deepEqual(stored, current);
   }
 });

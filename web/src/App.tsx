@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { fetchMetrics, fetchRunsWithEtag, fetchSummary, fetchSources, pooledResults, seriesKey, type RunSummary, type RunsCacheEntry, type ScalarSummary, type SourceStatus, type MetricField } from "./api";
+import { fetchMetrics, fetchRunCatalogWithEtag, fetchRunsWithEtag, fetchSummary, pooledResults, seriesKey, type RunCatalog, type RunCatalogCacheEntry, type RunSummary, type ScalarSummary, type MetricField } from "./api";
 import { RequestCache } from "./dataCache";
 import { applyTheme, loadThemeMode, nextThemeMode, resolveTheme, saveThemeMode, type ResolvedTheme, type ThemeMode } from "./theme";
 import { defaultMetricColumns, flattenConfig, parameterColumns } from "./comparison";
@@ -7,7 +7,7 @@ import type { WorkspaceState } from "./workspace";
 import { useWorkspace } from "./useWorkspace";
 import { topRunIds } from "./features";
 import { activeTarget } from "./targets";
-import { recentRunIds, replaceSelection, selectionPatch, sortRuns } from "./runSelection";
+import { availableSelection, reconcileSelection, recentRunIds, replaceSelection, selectionPatch, sortRuns } from "./runSelection";
 import { useColors } from "./useColors";
 import { useScalarSeries } from "./useScalarSeries";
 import ColorMenu from "./components/ColorMenu";
@@ -26,8 +26,10 @@ const EMPTY_SUMMARIES = new Map<string, ScalarSummary>();
 export default function App() {
   const workspace = useWorkspace();
   const { state, update, ready } = workspace;
-  const [runs, setRuns] = useState<RunSummary[]>([]);
-  const [sources, setSources] = useState<SourceStatus[]>([]);
+  const [runCatalog, setRunCatalog] = useState<RunCatalog | null>(null);
+  const [localRuns, setLocalRuns] = useState<RunSummary[]>([]);
+  const runs = runCatalog?.runs ?? localRuns;
+  const offlineSources = runCatalog?.sources.filter(source => !source.online) ?? [];
   const [detailsRun, setDetailsRun] = useState<{ run: RunSummary; tab: "overview" | "notes" } | null>(null);
   const catalogCache = useRef(new RequestCache<MetricField[]>(128));
   const summaryCache = useRef(new RequestCache<ScalarSummary>(256));
@@ -51,7 +53,7 @@ export default function App() {
   // bypass every per-run cache (manual refresh, note saves).
   const [pollTick, setPollTick] = useState(0);
   const [dataTick, setDataTick] = useState(0);
-  const runsCache = useRef(new Map<string, RunsCacheEntry>());
+  const runsCache = useRef<RunCatalogCacheEntry | null>(null);
   const [dataError, setDataError] = useState(false);
   const [discovering, setDiscovering] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
@@ -65,11 +67,9 @@ export default function App() {
   }, []);
   const orderedRuns = useMemo(() => sortRuns(runs, state.run_sort), [runs, state.run_sort]);
 
-  const selectedIds = useMemo(() => {
-    const ids = new Set(state.selected_ids ?? recentRunIds(runs));
-    if (state.baseline_id) ids.add(state.baseline_id);
-    return ids;
-  }, [state.selected_ids, state.baseline_id, runs]);
+  const selectedIds = useMemo(() => availableSelection(state, runs), [state.selected_ids, state.baseline_id, runs]);
+  const baselineId = state.baseline_id && selectedIds.has(state.baseline_id) ? state.baseline_id : null;
+  const displayState = useMemo(() => baselineId === state.baseline_id ? state : { ...state, baseline_id: baselineId }, [state, baselineId]);
   const selectedRuns = useMemo(() => orderedRuns.filter((run) => selectedIds.has(run.run_id)), [orderedRuns, selectedIds]);
   const selectionKey = selectedRuns.map((run) => run.run_id).sort().join("\u0000");
   // Cache entries carry each run's last_recorded_at so a poll only refetches runs whose data changed.
@@ -109,46 +109,42 @@ export default function App() {
     let cancelled = false;
     setDiscovering(true);
     let aggregateLoaded = false;
-    const publish = (nextRuns: RunSummary[]) => {
-      if (cancelled) return;
-      setRuns([...nextRuns].sort((a, b) => b.started_at - a.started_at));
-      setStatus("ready");
-    };
-    const cachedEntry = (localOnly: boolean) => runsCache.current.get(String(localOnly)) ?? null;
-    const storeEntry = (localOnly: boolean, entry: RunsCacheEntry) => runsCache.current.set(String(localOnly), entry);
     async function loadRuns() {
       try {
-        const configured = await fetchSources(controller.signal).catch(() => null);
-        if (cancelled) return;
-        if (configured) setSources(configured);
-        // Local-only installations need one scan. With peers, publish local
-        // discoveries independently so a slow source cannot delay their charts.
-        if (configured === null || configured.some((source) => source.kind === "peer")) {
-          void fetchRunsWithEtag(cachedEntry(true), true, controller.signal).then((entry) => {
+        // Show local discoveries during the initial scan, without merging old
+        // peer rows or treating this partial result as proof of deletion.
+        if (runsCache.current === null) {
+          void fetchRunsWithEtag(null, true, controller.signal).then((entry) => {
             if (cancelled || aggregateLoaded) return;
-            storeEntry(true, entry);
-            const localRuns = entry.data;
-            setRuns((previous) => [...localRuns, ...previous.filter((run) => !localRuns.some((local) => local.run_id === run.run_id) && run.source !== "local")].sort((a, b) => b.started_at - a.started_at));
+            setLocalRuns(entry.data);
             setStatus("ready");
           }).catch(() => {});
         }
-        const entry = await fetchRunsWithEtag(cachedEntry(false), false, controller.signal);
+        const entry = await fetchRunCatalogWithEtag(runsCache.current, controller.signal);
         if (cancelled) return;
-        storeEntry(false, entry);
+        runsCache.current = entry;
         aggregateLoaded = true;
-        publish(entry.data);
+        setRunCatalog(entry.data);
+        setLocalRuns([]);
+        setStatus("ready");
         setDiscovering(false);
-        if (configured === null || configured.some((source) => source.kind === "peer")) {
-          const sourceStatus = await fetchSources(controller.signal).catch(() => configured ?? []);
-          if (!cancelled) setSources(sourceStatus);
-        }
       } catch {
-        if (!cancelled) { setDiscovering(false); setStatus("error"); }
+        if (!cancelled) {
+          aggregateLoaded = true;
+          setRunCatalog(null); setLocalRuns([]);
+          setDiscovering(false); setStatus("error");
+        }
       }
     }
     void loadRuns();
     return () => { cancelled = true; controller.abort(); };
   }, [pollTick, dataTick]);
+
+  useEffect(() => {
+    if (!ready || discovering || status !== "ready" || !runCatalog) return;
+    const patch = reconcileSelection(state, runCatalog);
+    if (patch) update(patch);
+  }, [ready, discovering, status, runCatalog, state.selected_ids, state.baseline_id, update]);
 
   useEffect(() => {
     if (!ready || state.refresh_interval === 0) return;
@@ -220,7 +216,7 @@ export default function App() {
 
   function setBaseline(id: string | null) {
     setBaselineUndo(null);
-    update({ baseline_id: id, ...(id ? { selected_ids: [...new Set([...selectedIds, id])] } : {}) });
+    update({ baseline_id: id, ...(id ? { selected_ids: [...new Set([...(state.selected_ids ?? []), ...selectedIds, id])] } : {}) });
   }
 
   function openDetails(run: RunSummary, tab: "overview" | "notes") {
@@ -228,7 +224,9 @@ export default function App() {
   }
 
   function tagsSaved(id: string, tags: string[]) {
-    setRuns((previous) => previous.map((run) => run.run_id === id ? { ...run, tags } : run));
+    const replaceTags = (items: RunSummary[]) => items.map(run => run.run_id === id ? { ...run, tags } : run);
+    setRunCatalog(previous => previous ? { ...previous, runs: replaceTags(previous.runs) } : previous);
+    setLocalRuns(replaceTags);
     setDetailsRun((previous) => previous?.run.run_id === id ? { ...previous, run: { ...previous.run, tags } } : previous);
   }
 
@@ -239,6 +237,8 @@ export default function App() {
     content = <div className="empty" role="status">Loading runs…</div>;
   } else if (discovering && (runs.length === 0 || selectedRuns.length === 0)) {
     content = <div className="empty" role="status">Loading runs…</div>;
+  } else if (runs.length === 0 && offlineSources.length) {
+    content = <div className="empty"><h2>No runs available</h2><p>Waiting for sources to reconnect.</p></div>;
   } else if (runs.length === 0) {
     content = <div className="empty"><h2>No runs yet</h2><p>Log your first run with the SDK, then start <code>cloverboard serve --logdir ./runs</code>.</p></div>;
   } else if (selectedRuns.length === 0) {
@@ -246,18 +246,18 @@ export default function App() {
   } else if (state.panel === "images") {
     content = <MediaPanel key={`${workspace.contextVersion}:${state.media_type}`} workspaceId={workspace.workspaceId} runs={selectedRuns} state={state} colors={colors} refreshTick={pollTick + dataTick} onChange={update} />;
   } else if (state.panel === "table") {
-    content = <CompareTable runs={selectedRuns} configs={configs} params={params} metrics={chosenMetrics} summaries={visibleSummaries} colors={colors} state={state}
+    content = <CompareTable runs={selectedRuns} configs={configs} params={params} metrics={chosenMetrics} summaries={visibleSummaries} colors={colors} state={displayState}
       loading={(!metrics.length && !catalogReady) || loadedSummary !== summaryKey} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onAppearance={setAppearance} onDetails={openDetails} onBaseline={setBaseline} onEditTags={setTagRuns} />;
   } else if (!metricFields.length && !catalogReady) {
     content = <div className="empty" role="status">Loading metrics…</div>;
   } else {
-    content = <ChartGrid key={workspace.contextVersion} metrics={filteredMetricFields} loadingMetrics={loadingMetrics} dataTick={dataTick} runs={selectedRuns} series={series} colors={colors} smoothing={state.smoothing} state={state} summaries={visibleSummaries} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onLocateRun={locateRun} topIds={topIds} />;
+    content = <ChartGrid key={workspace.contextVersion} metrics={filteredMetricFields} loadingMetrics={loadingMetrics} dataTick={dataTick} runs={selectedRuns} series={series} colors={colors} smoothing={state.smoothing} state={displayState} summaries={visibleSummaries} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onLocateRun={locateRun} topIds={topIds} />;
   }
 
   return <div className="app" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
     <RunList runs={orderedRuns} selectedIds={selectedIds} colors={colors} onToggle={toggleRun} onBulkSelect={bulkSelect} onSelectOnly={selectOnly} sidebarWidth={sidebarWidth} onSidebarWidth={setSidebarWidth} filter={state.search} onFilterChange={(search) => update({ search })}
       state={state} onChange={update} onEditTags={setTagRuns} locateRequest={locateRequest}
-      baselineId={state.baseline_id} focusedId={focusedId} onFocusRun={setFocusedId} onAppearance={setAppearance} onDetails={openDetails} onBaseline={setBaseline} />
+      baselineId={baselineId} focusedId={focusedId} onFocusRun={setFocusedId} onAppearance={setAppearance} onDetails={openDetails} onBaseline={setBaseline} />
     <div className="workspace">
       <TopBar themeMode={themeMode} onThemeToggle={() => setThemeMode((mode) => nextThemeMode(mode))}
         onRefresh={() => { setDataTick((tick) => tick + 1); if (workspace.loadError) workspace.retry(); }}
@@ -270,8 +270,7 @@ export default function App() {
         {workspace.storageError && <p className="workspace-notice" role="alert">{workspace.storageError}<button className="text-button" onClick={workspace.retryStorage}>Retry saving</button></p>}
         {workspace.remoteError && <p className="workspace-notice" role="alert">{workspace.remoteError}<button className="text-button" onClick={() => void workspace.retryRemote()}>Retry remote saving</button></p>}
         {workspace.linkNotice && <p className="workspace-notice" role="status">{workspace.linkNotice}</p>}
-        {state.selected_ids?.some((id) => !runs.some((run) => run.run_id === id)) && status === "ready" && !discovering && <p className="workspace-notice" role="status">Some runs in this selection are unavailable on this instance.</p>}
-        {sources.some((source) => !source.online) && <p className="workspace-notice" role="status">Offline: {sources.filter((source) => !source.online).map((source) => source.label).join(", ")}. Selection and colors are retained.</p>}
+        {offlineSources.length > 0 && <p className="workspace-notice" role="status">Offline: {offlineSources.map(source => source.label).join(", ")}</p>}
         {(dataError || seriesError && needsSeries) && state.panel !== "images" && <p className="data-error" role="alert">Some metrics could not be updated. Available curves and previously loaded samples are retained.</p>}
         {baselineUndo && <p className="workspace-notice" role="status">Baseline cleared.<button className="text-button" onClick={() => setBaseline(baselineUndo)}>Undo</button><button className="text-button" onClick={() => setBaselineUndo(null)} aria-label="Dismiss baseline notice">×</button></p>}
         <ColorLegend runs={selectedRuns} settings={state.colors} colors={colors} theme={resolvedTheme} showTopK={state.panel === "charts"} />

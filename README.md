@@ -27,7 +27,9 @@ npm ci --prefix web
 npm run build --prefix web
 ```
 
-Built wheels include the WebUI and do not require Node.js to run.
+You can also download a `.whl` from **Releases** in this repository's right
+sidebar and install it with pip. Built wheels include the WebUI and do not
+require Node.js to run.
 
 ### 2. Log from Python
 

@@ -79,6 +79,11 @@ class SourceStatusResponse(BaseModel):
     online: bool
 
 
+class RunCatalogResponse(BaseModel):
+    runs: list[RunSummaryResponse]
+    sources: list[SourceStatusResponse]
+
+
 class TagsResponse(BaseModel):
     tags: list[str]
 

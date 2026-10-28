@@ -125,7 +125,7 @@ export default function RunList({
           <label className="run-checkbox" title={`Select or deselect the ${visibleIds.length} visible runs. Other selections are kept.`}>
             <Checkbox label="Select filtered runs" disabled={Boolean(search.error) || !visibleIds.length} checked={visibleIds.length > 0 && selectedVisible === visibleIds.length} indeterminate={selectedVisible > 0 && selectedVisible < visibleIds.length} onChange={(checked) => onBulkSelect(visibleIds, checked)} />
           </label>
-          <span className="run-selection-count" role="status" title={hiddenSelected ? `${selectedIds.size} selected runs. ${hiddenSelected} hidden by list filters; they remain selected.` : `${selectedIds.size} selected runs`}>{selectedIds.size} selected{hiddenSelected > 0 && <span className="selection-hidden"> · {hiddenSelected} hidden</span>}</span>
+          <span className="run-selection-count" role="status" title={hiddenSelected ? `${selectedRuns.length} selected runs. ${hiddenSelected} hidden by list filters; they remain selected.` : `${selectedRuns.length} selected runs`}>{selectedRuns.length} selected{hiddenSelected > 0 && <span className="selection-hidden"> · {hiddenSelected} hidden</span>}</span>
           <Popover className="selection-menu" label="Selection actions" trigger={<DotsThreeIcon size={18} />}>
             <div className="menu-heading">Select latest with metrics</div>
             <div className="recent-run-options">{[1, 3, 5, 10].map((count) => <button className="button quiet-button" disabled={!runs.some((run) => run.has_scalars)} key={count} onClick={(event) => menuAction(event, () => onSelectOnly(recentRunIds(runs, count)))}>Latest {count}</button>)}</div>
@@ -152,7 +152,7 @@ export default function RunList({
                     title={`${run.name ?? run.run_id}\n${run.source_label ?? run.source}\n${run.run_id}`}
                   >
                     <span className="run-name-primary"><span>{run.name ?? run.run_id}</span>{baselineId === run.run_id && <span className="baseline-mark" title="Baseline" aria-label="Baseline">B</span>}</span>
-                    {run.source_label && <small className={`run-source${run.source_online === false ? " source-offline" : ""}`}>@{run.source_label}{run.source_online === false ? " · Offline" : ""}</small>}
+                    {run.source_label && <small className="run-source">@{run.source_label}</small>}
                   </label>
                   <RunActions run={run} baselineId={baselineId} onBaseline={onBaseline} onDetails={onDetails} onEditTags={onEditTags} />
                 </div>

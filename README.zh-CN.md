@@ -27,6 +27,7 @@ npm ci --prefix web
 npm run build --prefix web
 ```
 
+也可以从仓库右侧的 **Releases** 下载 `.whl` 文件，使用 pip 安装。
 构建好的 wheel 包含 WebUI，安装后运行无需 Node.js。
 
 ### 2. 用 Python 记录

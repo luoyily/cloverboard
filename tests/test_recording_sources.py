@@ -133,7 +133,7 @@ def test_assets_share_auth_and_reject_index_paths_outside_run(tmp_path):
     assert not (tmp_path / ".workspace").exists()
 
 
-def test_one_hop_sources_isolate_same_ids_authenticate_and_keep_offline_identity(monkeypatch, tmp_path):
+def test_one_hop_sources_isolate_same_ids_authenticate_and_drop_offline_runs(monkeypatch, tmp_path):
     run = RunSummary("same", "Example", 1)
     primary = FakeStorageReader([run], {("same", "loss"): [ScalarPoint(0, .2)]})
     leaf = create_app(primary, share=True, sources=[Source("nested", "Nested", url="http://unreachable.test")])
@@ -169,9 +169,12 @@ def test_one_hop_sources_isolate_same_ids_authenticate_and_keep_offline_identity
     assert client.get("/api/scalars", params={**query, "local_only": True}).status_code == 503
     assert len(client.get("/api/runs", params={"local_only": True}).json()) == 2
     offline = True
-    cached = client.get("/api/runs").json()
-    assert next(run for run in cached if run["run_id"] == remote_id)["source_online"] is False
-    assert len(cached) == 3
+    available = client.get("/api/runs").json()
+    assert remote_id not in {run["run_id"] for run in available}
+    assert len(available) == 2
+    assert next(source for source in client.get("/api/sources").json() if source["source_id"] == "peer")["online"] is False
+    offline = False
+    assert remote_id in {run["run_id"] for run in client.get("/api/runs").json()}
     assert client.get("/api/scalars", params={"run_id": "same", "metric": "loss"}).status_code == 200
     assert calls
 

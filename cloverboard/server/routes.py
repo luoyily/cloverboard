@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from cloverboard.server.models import (
     MetricListResponse,
+    RunCatalogResponse,
     RunSummaryResponse,
     ScalarPointResponse,
     ScalarSeriesResponse,
@@ -19,7 +20,7 @@ from cloverboard.server.models import (
     ScalarCountResponse,
 )
 from cloverboard.storage.protocols import RunNotFound, ScalarPoint, StorageReader
-from cloverboard.server.sources import split_run_id
+from cloverboard.server.sources import SourceReader, split_run_id
 from cloverboard.metrics import metric_field
 
 router = APIRouter()
@@ -40,17 +41,8 @@ def get_run_id(run_id: str) -> str:
     return run_id
 
 
-@router.get("/api/runs", tags=["Runs"], response_model=list[RunSummaryResponse], response_model_exclude_unset=True)
-def list_runs(
-    request: Request,
-    reader: StorageReader | None = Depends(get_reader),
-) -> list[RunSummaryResponse] | Response:
-    """List all runs with config and source metadata; no server-side pagination or filtering.
-
-    Responses carry a content ETag; an unchanged payload answers 304 to If-None-Match,
-    so polling costs an empty body instead of the full run list.
-    """
-    rows = [] if reader is None else [
+def _run_rows(runs, writable):
+    rows = [
         RunSummaryResponse(
             run_id=run.run_id,
             name=run.name,
@@ -58,18 +50,53 @@ def list_runs(
             config=run.config,
             source=run.source,
             has_notes=run.has_notes, note_excerpt=run.note_excerpt,
-            tags=run.tags, tags_writable=run.tags_writable and request.app.state.workspace.writable,
+            tags=run.tags, tags_writable=run.tags_writable and writable,
             has_scalars=run.has_scalars, last_recorded_at=run.last_recorded_at,
             **({"source_label": run.source_label, "source_online": run.source_online} if run.source_label is not None else {}),
             **({"time_origin": run.time_origin, "time_origin_kind": run.time_origin_kind} if run.time_origin is not None and math.isfinite(run.time_origin) else {}),
         )
-        for run in reader.list_runs()
+        for run in runs
     ]
-    payload = [row.model_dump(mode="json", exclude_unset=True) for row in rows]
+    return [row.model_dump(mode="json", exclude_unset=True) for row in rows]
+
+
+def _etag_response(request, payload):
     etag = '"' + hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:32] + '"'
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers={"ETag": etag})
     return JSONResponse(payload, headers={"ETag": etag})
+
+
+@router.get("/api/runs", tags=["Runs"], response_model=list[RunSummaryResponse], response_model_exclude_unset=True)
+def list_runs(
+    request: Request,
+    reader: StorageReader | None = Depends(get_reader),
+) -> Response:
+    """List currently available runs, with an ETag for unchanged results.
+
+    local_only selects the one-hop peer transport and local discovery path.
+    """
+    runs = reader.list_runs() if reader is not None else []
+    return _etag_response(request, _run_rows(runs, request.app.state.workspace.writable))
+
+
+@router.get("/api/run-catalog", tags=["Runs"], response_model=RunCatalogResponse)
+def run_catalog(request: Request) -> Response:
+    """Return a complete run scan and its source status in the same snapshot.
+
+    An online source's missing IDs can be removed from the current selection;
+    failed sources must retain their saved IDs. Both results participate in ETag
+    revalidation, including source status changes while the run list is empty.
+    """
+    reader = request.app.state.reader
+    if isinstance(reader, SourceReader):
+        runs, sources = reader.run_catalog()
+    else:
+        runs = reader.list_runs() if reader is not None else []
+        sources = [{"source_id": "local", "label": "Local", "kind": "local", "online": True}] if reader is not None else []
+    return _etag_response(request, {
+        "runs": _run_rows(runs, request.app.state.workspace.writable), "sources": sources,
+    })
 
 
 @router.get("/api/metrics", tags=["Scalars"], response_model=MetricListResponse)

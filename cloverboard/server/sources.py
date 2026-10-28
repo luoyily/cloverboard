@@ -132,7 +132,6 @@ class SourceReader:
     def __init__(self, primary: StorageReader | None, sources: list[Source]):
         self.primary = primary
         self.sources = {source.key: source for source in sources}
-        self._runs: dict[str, list[RunSummary]] = {}
         self._online = {source.key: True for source in sources}
         self._lock = Lock()
         self._client_lock = Lock()
@@ -176,7 +175,10 @@ class SourceReader:
                 runs = source.reader.list_runs()
             else:
                 runs = []
-                for item in self._json(source, "/api/runs"):
+                response = self._json(source, "/api/runs")
+                if not isinstance(response, list):
+                    raise SourceUnavailable("Peer run list must be a JSON array")
+                for item in response:
                     value = RunSummaryResponse.model_validate(item)
                     split_run_id(value.run_id)
                     runs.append(RunSummary(value.run_id, value.name, value.started_at, value.config,
@@ -185,22 +187,33 @@ class SourceReader:
                                            has_scalars=value.has_scalars, last_recorded_at=value.last_recorded_at))
             translated = [replace(run, run_id=qualify(source.key, run.run_id), source=source.key,
                                   source_label=source.label + (f" / {run.source_label}" if run.source_label else ""), source_online=True) for run in runs]
-            with self._lock:
-                self._runs[source.key] = translated
-                self._online[source.key] = True
-            return translated
+            online = True
         except Exception:
-            with self._lock:
-                self._online[source.key] = False
-                return [replace(run, source_online=False) for run in self._runs.get(source.key, [])]
+            translated, online = [], False
+        with self._lock:
+            self._online[source.key] = online
+        return translated, {
+            "source_id": source.key, "label": source.label,
+            "kind": "local" if source.reader is not None else "peer", "online": online,
+        }
 
-    def list_runs(self):
-        runs = self.primary.list_runs() if self.primary else []
+    def run_catalog(self):
+        """Read one complete scan and its source results without offline fallback.
+
+        Source status belongs to this scan, even when another request updates
+        status() concurrently. A failed primary scan propagates to the caller.
+        """
+        runs = list(self.primary.list_runs()) if self.primary is not None else []
+        sources = [{"source_id": "local", "label": "Local", "kind": "local", "online": True}] if self.primary is not None else []
         if self.sources:
             with ThreadPoolExecutor(max_workers=min(8, len(self.sources))) as pool:
-                for group in pool.map(self._list_source, self.sources.values()):
+                for group, status in pool.map(self._list_source, self.sources.values()):
                     runs.extend(group)
-        return runs
+                    sources.append(status)
+        return runs, sources
+
+    def list_runs(self):
+        return self.run_catalog()[0]
 
     def status(self):
         with self._lock:

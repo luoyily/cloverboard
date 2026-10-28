@@ -29,6 +29,7 @@ export interface ImageRecord { image_id: string; name: string; step: number; wal
 export interface SnapshotManifest { status: "complete" | "partial" | "error"; created_at?: number; root?: string; files?: { path: string; bytes: number }[]; skipped?: { path: string; reason: string }[]; total_bytes?: number; archive_bytes?: number; error?: string; limit_reason?: string }
 export interface RunDetails { config: Record<string, unknown>; env: Record<string, unknown>; snapshot: SnapshotManifest | null }
 export interface SourceStatus { source_id: string; label: string; kind: "local" | "peer"; online: boolean }
+export interface RunCatalog { runs: RunSummary[]; sources: SourceStatus[] }
 
 export interface MetricField { metric: string; group: string; name: string }
 export interface MediaNameSummary { name: string; count: number; step_count: number; first_step: number; last_step: number }
@@ -82,7 +83,6 @@ export async function pooledResults<T, R>(items: T[], action: (item: T) => Promi
   return results;
 }
 export function fetchRunDetails(runId: string, signal?: AbortSignal): Promise<RunDetails> { return getJson(`/api/run-details?${new URLSearchParams({ run_id: runId })}`, { signal }); }
-export function fetchSources(signal?: AbortSignal): Promise<SourceStatus[]> { return getJson("/api/sources", { signal }); }
 export function assetUrl(runId: string, assetId: string, thumbnail = false): string { return `/api/asset?${new URLSearchParams({ run_id: runId, asset_id: assetId, thumbnail: String(thumbnail) })}`; }
 
 export interface ScalarSeries {
@@ -122,17 +122,27 @@ export function fetchRuns(localOnly = false, signal?: AbortSignal): Promise<RunS
   return getJson<RunSummary[]>(localOnly ? "/api/runs?local_only=true" : "/api/runs", { signal });
 }
 
-export interface RunsCacheEntry { etag: string; data: RunSummary[] }
+interface CachedResponse<T> { etag: string; data: T }
+export type RunsCacheEntry = CachedResponse<RunSummary[]>;
+export type RunCatalogCacheEntry = CachedResponse<RunCatalog>;
 
-/** Fetch the run list with ETag revalidation: an unchanged payload reuses the cached data. */
-export async function fetchRunsWithEtag(cached: RunsCacheEntry | null, localOnly = false, signal?: AbortSignal): Promise<RunsCacheEntry> {
-  const response = await fetch(localOnly ? "/api/runs?local_only=true" : "/api/runs", {
+async function fetchWithEtag<T>(url: string, cached: CachedResponse<T> | null, signal?: AbortSignal): Promise<CachedResponse<T>> {
+  const response = await fetch(url, {
     headers: cached?.etag ? { "If-None-Match": cached.etag } : {},
     signal,
   });
   if (response.status === 304 && cached) return cached;
   if (!response.ok) throw await responseError(response);
-  return { etag: response.headers.get("etag") ?? "", data: (await response.json()) as RunSummary[] };
+  return { etag: response.headers.get("etag") ?? "", data: (await response.json()) as T };
+}
+
+export function fetchRunsWithEtag(cached: RunsCacheEntry | null, localOnly = false, signal?: AbortSignal): Promise<RunsCacheEntry> {
+  return fetchWithEtag(localOnly ? "/api/runs?local_only=true" : "/api/runs", cached, signal);
+}
+
+/** Runs and source health are revalidated together from the same completed scan. */
+export function fetchRunCatalogWithEtag(cached: RunCatalogCacheEntry | null, signal?: AbortSignal): Promise<RunCatalogCacheEntry> {
+  return fetchWithEtag("/api/run-catalog", cached, signal);
 }
 
 export function fetchMetrics(runId: string, signal?: AbortSignal): Promise<MetricList> {
