@@ -3,30 +3,32 @@ import { useState } from "react";
 import { PaletteIcon } from "@phosphor-icons/react";
 import type { RunSummary } from "../api";
 import { flattenConfig } from "../comparison";
-import { reassignColors, slotColor } from "../colors";
-import { parameterValue, type ColorRegistry, type ColorSettings } from "../features";
+import { assignColors, recolorRuns, paletteColor, visibleColor, undoColors, type ColorUndo } from "../colors";
+import { parameterValue, type ColorSettings } from "../features";
 import type { ResolvedTheme } from "../theme";
-import { DEFAULT_PALETTE, paletteBaseColors, paletteKey, paletteName, type CustomPalette, type PaletteInput } from "../palettes";
+import { paletteBaseColors, paletteKey, paletteName, type CustomPalette, type PaletteInput } from "../palettes";
 import Popover from "./Popover";
+import { MAX_PALETTES } from "../viewingConfig";
 import PaletteEditor from "./PaletteEditor";
 
-export default function ColorMenu({ runs, selectedIds, settings, registry, theme, localOnly, writable, ready, onSavePalette, onDeletePalette, onChange }: { runs: RunSummary[]; selectedIds: Set<string>; settings: ColorSettings; registry: ColorRegistry; theme: ResolvedTheme; localOnly: boolean; writable: boolean; ready: boolean; onSavePalette: (input: PaletteInput, id?: string) => Promise<CustomPalette>; onDeletePalette: (id: string) => Promise<void>; onChange: (settings: ColorSettings) => void }) {
-  const [undo, setUndo] = useState<ColorSettings | null>(null);
+export default function ColorMenu({ runs, selectedIds, settings, theme, palettes, ready, onSavePalette, onDeletePalette, onChange }: { runs: RunSummary[]; selectedIds: Set<string>; settings: ColorSettings; theme: ResolvedTheme; palettes: CustomPalette[]; ready: boolean; onSavePalette: (input: PaletteInput, id?: string) => Promise<CustomPalette>; onDeletePalette: (id: string) => Promise<void>; onChange: (settings: ColorSettings) => void }) {
+  const [undo, setUndo] = useState<ColorUndo | null>(null);
   const [domainText, setDomainText] = useState<[string, string] | null>(null);
   const [error, setError] = useState("");
   const [editor, setEditor] = useState<{ initial: PaletteInput; id?: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const savedPalette = registry.palettes.find((item) => item.id === settings.palette.id);
+  const savedPalette = palettes.find((item) => item.id === settings.palette.id);
   const snapshotOnly = settings.palette.kind === "custom" && (!savedPalette || paletteKey({ kind: "custom", ...savedPalette }) !== paletteKey(settings.palette) || savedPalette.name !== settings.palette.name);
   const baseColors = paletteBaseColors(settings.palette);
-  const canCreate = writable && ready && registry.palettes.length < 32;
+  const editablePalette = savedPalette;
+  const canCreate = ready && palettes.length < MAX_PALETTES;
   const fields = [...new Set(runs.flatMap((r) => [...flattenConfig(r.config).keys()]))].sort();
   const numeric = fields.filter((field) => runs.some((r) => typeof parameterValue(r, field) === "number"));
-  function patch(values: Partial<ColorSettings>) { onChange({ ...settings, ...values }); setError(""); setDomainText(null); setConfirmDelete(false); }
+  function patch(values: Partial<ColorSettings>) { onChange(recolorRuns(runs, { ...settings, ...values })); setUndo(null); setError(""); setDomainText(null); setConfirmDelete(false); }
   function openEditor(button: HTMLButtonElement, editing: boolean) {
     button.closest("details")?.removeAttribute("open");
-    setEditor({ ...(editing && savedPalette ? { id: savedPalette.id } : {}), initial: editing && savedPalette ? { name: savedPalette.name, colors: [...savedPalette.colors] } : { name: `${paletteName(settings.palette)} copy`.slice(0, 60), colors: [...baseColors] } });
+    setEditor({ ...(editing && editablePalette ? { id: editablePalette.id } : {}), initial: editing && editablePalette ? { name: editablePalette.name, colors: [...editablePalette.colors] } : { name: `${paletteName(settings.palette)} copy`.slice(0, 60), colors: [...baseColors] } });
     setError(""); setConfirmDelete(false);
   }
   function domainFor(field: string): [number, number] {
@@ -46,7 +48,7 @@ export default function ColorMenu({ runs, selectedIds, settings, registry, theme
         {(settings.mode === "continuous" ? numeric : fields).map((field) => <option key={field} value={field}>{field}</option>)}
         {!(settings.mode === "continuous" ? numeric : fields).includes(settings.field) && <option value={settings.field}>{settings.field || "No recorded parameter"}</option>}
       </Select></label>}
-      {settings.mode === "parameter" && <p className="field-help">Each parameter value uses a color from the selected palette. Runs within a family use subtle shades; hover a run to isolate it.</p>}
+      {settings.mode === "parameter" && <p className="field-help">Parameter values determine palette colors with subtle shades for individual runs. Fixed run colors are preserved.</p>}
       {settings.mode === "continuous" && <>
         <div className="inline-fields">{([0, 1] as const).map((i) => <label key={i}>{i === 0 ? "Minimum" : "Maximum"}<input className="text-input" type="number" step="any" value={domainText?.[i] ?? settings.domain[i]} onChange={(e) => { const next: [string, string] = domainText ? [...domainText] : settings.domain.map(String) as [string, string]; next[i] = e.target.value; setDomainText(next); }} /></label>)}</div>
         <div className="inline-fields"><button className="button quiet-button" onClick={() => { const d = domainText?.map(Number) as [number, number] | undefined; if (!d || domainText?.some((s) => !s.trim()) || !d.every(Number.isFinite) || d[0] >= d[1]) setError("Use a finite, increasing range."); else patch({ domain: d }); }}>Apply range</button><button className="button quiet-button" onClick={() => patch({ domain: domainFor(settings.field) })}>Fit current runs</button></div>
@@ -56,39 +58,39 @@ export default function ColorMenu({ runs, selectedIds, settings, registry, theme
         <label>Palette<Select disabled={deleting} value={snapshotOnly ? "view-snapshot" : settings.palette.id} onChange={(e) => {
           const id = e.target.value;
           if (id === "view-snapshot") return;
-          const custom = registry.palettes.find((item) => item.id === id);
+          const custom = palettes.find((item) => item.id === id);
           patch({ palette: custom ? { kind: "custom", ...custom, colors: [...custom.colors] } : { kind: "builtin", id: id === "bright" ? "bright" : "default" } }); setUndo(null);
         }}>
           <optgroup label="Built-in"><option value="default">Default</option><option value="bright">Bright</option></optgroup>
-          {registry.palettes.length > 0 && <optgroup label="Workspace">{registry.palettes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>}
+          {palettes.length > 0 && <optgroup label="Saved palettes">{palettes.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>}
           {snapshotOnly && <option value="view-snapshot">{paletteName(settings.palette)} · View snapshot</option>}
         </Select></label>
         <div className="palette-preview" role="img" aria-label={`${paletteName(settings.palette)} palette, ${baseColors.length} colors`}>
           {Array.from({ length: baseColors.length }, (_, i) => {
-            const color = slotColor(i, registry.seed, theme, settings.palette);
+            const color = visibleColor(paletteColor(i, settings.palette), theme, settings.palette);
             return <span key={i} style={{ background: color }} title={color} />;
           })}
         </div>
         <p className="field-help">{baseColors.length} base colors, with additional shades for more {settings.mode === "parameter" ? "families" : "runs"}. Colors adapt to light and dark backgrounds.</p>
-        <div className="palette-library-actions"><button className="button quiet-button" disabled={!canCreate || deleting} onClick={(event) => openEditor(event.currentTarget, false)}>{snapshotOnly && !savedPalette ? "Save a copy" : "New palette"}</button>{savedPalette && <><button className="button quiet-button" disabled={!writable || !ready || deleting} onClick={(event) => openEditor(event.currentTarget, true)}>Edit</button><button className="button quiet-button" disabled={!writable || !ready || deleting} onClick={() => setConfirmDelete(!confirmDelete)}>Delete</button></>}</div>
-        {confirmDelete && savedPalette && <div className="settings-form palette-delete-confirm"><p className="field-help">Delete “{savedPalette.name}” from this workspace? Saved Views keep their colors.</p><div className="inline-fields"><button className="button quiet-button" disabled={deleting} onClick={() => setConfirmDelete(false)}>Cancel</button><button className="button quiet-button" disabled={deleting} onClick={async () => {
+        <div className="palette-library-actions"><button className="button quiet-button" disabled={!canCreate || deleting} onClick={(event) => openEditor(event.currentTarget, false)}>{snapshotOnly ? "Save a copy" : "New palette"}</button>{editablePalette && <><button className="button quiet-button" disabled={!ready || deleting} onClick={(event) => openEditor(event.currentTarget, true)}>Edit</button><button className="button quiet-button" disabled={!ready || deleting} onClick={() => setConfirmDelete(!confirmDelete)}>Delete</button></>}</div>
+        {confirmDelete && savedPalette && <div className="settings-form palette-delete-confirm"><p className="field-help">Delete “{savedPalette.name}”? Current and saved Views keep their colors.</p><div className="inline-fields"><button className="button quiet-button" disabled={deleting} onClick={() => setConfirmDelete(false)}>Cancel</button><button className="button quiet-button" disabled={deleting} onClick={async () => {
           setDeleting(true); setError("");
-          try { await onDeletePalette(savedPalette.id); patch({ palette: { ...DEFAULT_PALETTE } }); setUndo(null); }
+          try { await onDeletePalette(savedPalette.id); setConfirmDelete(false); setUndo(null); }
           catch (cause) { setError(cause instanceof Error ? cause.message : "Could not delete palette."); }
           finally { setDeleting(false); }
         }}>{deleting ? "Deleting…" : "Confirm delete"}</button></div></div>}
-        {snapshotOnly && <p className="field-help">This View uses a saved palette snapshot. Select a workspace palette to use its latest colors.</p>}
-        {!writable ? <p className="field-help">Read-only workspace · palettes can be selected; editing is disabled.</p> : !ready ? <p className="field-help">Waiting for workspace palette library…</p> : registry.palettes.length >= 32 ? <p className="field-help">Workspace limit reached: 32 custom palettes.</p> : null}
+        {snapshotOnly && <p className="field-help">This View uses a saved palette snapshot. Select a library palette to use its latest colors.</p>}
+        {!ready ? <p className="field-help">Loading palette library…</p> : !canCreate && <p className="field-help">Limit reached: {MAX_PALETTES} palettes.</p>}
       </>}
       {settings.mode === "random" && <>
-        <p className="field-help">Click a run’s swatch to edit its color. Manual colors stay locked.</p>
-        <div className="inline-fields"><button className="button quiet-button" disabled={selectedIds.size === 0} onClick={() => { setUndo(settings); onChange(reassignColors(runs, selectedIds, registry, settings)); }}>Reassign selected</button><button className="button quiet-button" disabled={!undo} onClick={() => { if (undo) onChange({ ...settings, assignments: undo.assignments }); setUndo(null); }}>Undo</button></div>
+        <p className="field-help">Click a run’s swatch to edit or fix its color. Fixed colors survive palette and mode changes.</p>
+        <div className="inline-fields"><button className="button quiet-button" disabled={selectedIds.size === 0} onClick={() => { const next = assignColors(runs, settings, selectedIds); setUndo({ before: settings.runs, after: next.runs }); onChange(next); }}>Reassign selected</button><button className="button quiet-button" disabled={!undo} onClick={() => { if (undo) onChange(undoColors(settings, undo)); setUndo(null); }}>Undo</button></div>
       </>}
       {error && <p className="field-help" role="alert">{error}</p>}
-      {localOnly && <p className="field-help" role="status">Color identities could not be saved. Refresh to retry.</p>}
     </div>
   </Popover>{editor && <PaletteEditor initial={editor.initial} editing={!!editor.id} onClose={() => setEditor(null)} onSave={async (input) => {
     const palette = await onSavePalette(input, editor.id);
-    patch({ palette: { kind: "custom", ...palette } }); setUndo(null);
+    patch({ palette: { kind: "custom", ...palette } });
+    setUndo(null); setError("");
   }} />}</>;
 }

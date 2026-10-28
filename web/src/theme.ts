@@ -4,14 +4,15 @@ export type ResolvedTheme = "light" | "dark";
 const THEME_STORAGE_KEY = "cloverboard.theme";
 
 export function loadThemeMode(): ThemeMode {
-  const saved = localStorage.getItem(THEME_STORAGE_KEY);
-  if (saved === "light" || saved === "dark" || saved === "system") {
-    return saved;
-  }
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    if (saved === "light" || saved === "dark" || saved === "system") return saved;
+  } catch { /* Keep the UI usable when browser storage is unavailable. */ }
   return "light";
 }
 export function saveThemeMode(mode: ThemeMode): void {
-  localStorage.setItem(THEME_STORAGE_KEY, mode);
+  try { localStorage.setItem(THEME_STORAGE_KEY, mode); }
+  catch { /* Workspace persistence reports browser storage failures. */ }
 }
 
 export function resolveTheme(mode: ThemeMode): ResolvedTheme {

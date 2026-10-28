@@ -24,11 +24,10 @@ interface CompareTableProps {
   onAppearance: (run: RunSummary) => void;
   onDetails: (run: RunSummary, tab: "overview" | "notes") => void;
   onBaseline: (id: string | null) => void;
-  topIds: Set<string> | null;
   onEditTags: (runs: RunSummary[]) => void;
 }
 
-export default function CompareTable({ runs, configs, params, metrics, summaries, colors, state, loading, onChange, focusedId, onFocusRun, onAppearance, onDetails, onBaseline, topIds, onEditTags }: CompareTableProps) {
+export default function CompareTable({ runs, configs, params, metrics, summaries, colors, state, loading, onChange, focusedId, onFocusRun, onAppearance, onDetails, onBaseline, onEditTags }: CompareTableProps) {
   const formatMetric = (value: number | null | undefined) => formatRecordedMetric(value, state.table_decimals);
   const visibleParams = params.filter((param) => !state.hidden_params.includes(param.key) &&
     (!state.differences_only || param.different || runs.length < 2));
@@ -86,7 +85,7 @@ export default function CompareTable({ runs, configs, params, metrics, summaries
             {metrics.map((metric) => <td key={metric}><TargetCell metric={metric} group={state.targets[metric]} decimals={state.table_decimals} onChange={(group) => { const targets = { ...state.targets }; if (group.items.length) targets[metric] = group; else delete targets[metric]; onChange({ targets }); }} /></td>)}
             {visibleParams.map((param) => <td key={param.key}>—</td>)}
           </tr>}
-          {sortedRuns.map((run) => <tr key={run.run_id} className={`${run.run_id === state.baseline_id ? "table-baseline-row " : ""}${focusedId === run.run_id ? "run-focused" : ""}${topIds && !topIds.has(run.run_id) && state.baseline_id !== run.run_id ? " ranked-muted" : ""}`} onPointerEnter={() => onFocusRun(run.run_id)} onPointerLeave={() => onFocusRun(null)} onFocus={() => onFocusRun(run.run_id)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) onFocusRun(null); }}>
+          {sortedRuns.map((run) => <tr key={run.run_id} className={`${run.run_id === state.baseline_id ? "table-baseline-row " : ""}${focusedId === run.run_id ? "run-focused" : ""}`} onPointerEnter={() => onFocusRun(run.run_id)} onPointerLeave={() => onFocusRun(null)} onFocus={() => onFocusRun(run.run_id)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) onFocusRun(null); }}>
           <th scope="row" className="identity-column" title={`${runLabel(run)}\n${run.run_id}`}>
             <div className="compare-run"><button className="run-swatch-button" type="button" aria-label={`Color for ${runLabel(run)}`} title="Change color" onClick={() => onAppearance(run)}><span className="swatch" style={{ backgroundColor: colors.get(run.run_id) }} /></button>
               <span className="compare-run-name">{runLabel(run)}</span>

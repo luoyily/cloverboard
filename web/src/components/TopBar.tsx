@@ -3,18 +3,18 @@ import {
   MoonIcon,
   SunIcon,
   CloudSlashIcon,
-  LockSimpleIcon,
 } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import type { ThemeMode } from "../theme";
 import type { SavedView, WorkspaceState } from "../workspace";
+import type { ViewingConfig } from "../viewingConfig";
+import type { SettingsMode } from "../workspaceSession";
 import ChartToolbar from "./ChartToolbar";
-import { clearYZoom } from "../features";
 import ViewMenu from "./ViewMenu";
 import ImageSettings from "./ImageSettings";
-import DisplayMenu from "./DisplayMenu";
 import RefreshControl from "./RefreshControl";
 import TargetsMenu from "./TargetsMenu";
+import SettingsMenu from "./SettingsMenu";
 
 interface TopBarProps {
   themeMode: ThemeMode;
@@ -22,9 +22,15 @@ interface TopBarProps {
   onRefresh: () => void;
   state: WorkspaceState;
   views: SavedView[];
+  sharedViews: SavedView[];
+  config: ViewingConfig;
+  onImportConfig: (text: string) => Promise<void>;
+  onRestoreRemote: () => Promise<void>;
   writable: boolean;
+  mode: SettingsMode;
+  onMode: (mode: SettingsMode) => Promise<void>;
   ready: boolean;
-  localOnly: boolean;
+  storageError: string;
   onChange: (patch: Partial<WorkspaceState>) => void;
   onOpenView: (view: SavedView) => void;
   onSaveView: (name: string, viewId?: string) => Promise<void>;
@@ -46,10 +52,10 @@ export default function TopBar({
   onThemeToggle,
   onRefresh,
   state,
-  views,
-  writable,
+  views, sharedViews, config, onImportConfig, onRestoreRemote,
+  writable, mode, onMode,
   ready,
-  localOnly,
+  storageError,
   onChange,
   onOpenView,
   onSaveView,
@@ -84,18 +90,18 @@ export default function TopBar({
             }}
           >{panel === "charts" ? "Charts" : panel === "table" ? "Table" : "Media"}</button>)}
         </div>
-        <ViewMenu state={state} views={views} writable={writable} onOpen={onOpenView} onSave={onSaveView} onDelete={onDeleteView} onRename={onRenameView} />
+        <ViewMenu key={mode} state={state} views={views} sharedViews={sharedViews} ready={ready} onOpen={onOpenView} onSave={onSaveView} onDelete={onDeleteView} onRename={onRenameView} />
       </div>
       <div className="toolbar-right">
         {colorControls}
-        <DisplayMenu metrics={metrics} settings={state.colors.top_k} onChange={(top_k) => onChange({ colors: { ...state.colors, top_k } })} />
         {state.panel !== "images" && <TargetsMenu metrics={metrics} state={state} onChange={onChange} />}
         {state.panel === "charts" ? <ChartToolbar
+          metrics={metrics} topK={state.colors.top_k} onTopKChange={(top_k) => onChange({ colors: { ...state.colors, top_k } })}
           metricFilter={state.metric_filter} onMetricFilterChange={(metric_filter) => onChange({ metric_filter })}
           density={state.chart_density} onDensityChange={(chart_density) => onChange({ chart_density })}
           showLegend={state.show_chart_legend} onShowLegendChange={(show_chart_legend) => onChange({ show_chart_legend })}
-          yScale={state.y_scale} onYScaleChange={(y_scale) => onChange({ y_scale, chart_zoom: clearYZoom(state.chart_zoom, (metric) => !state.chart_scales[metric]) })}
-          warmup={state.y_warmup} onWarmupChange={(y_warmup) => onChange({ y_warmup, chart_zoom: clearYZoom(state.chart_zoom, (metric) => !Object.hasOwn(state.chart_warmup, metric)) })}
+          yScale={state.y_scale} onYScaleChange={(y_scale) => onChange({ y_scale })}
+          warmup={state.y_warmup} onWarmupChange={(y_warmup) => onChange({ y_warmup })}
           smoothing={state.smoothing} onSmoothingChange={(value) => onChange({ smoothing: value })}
           tooltipDecimals={state.tooltip_decimals} onTooltipDecimalsChange={(value) => onChange({ tooltip_decimals: value })}
           tooltipSort={state.tooltip_sort} onTooltipSortChange={(value) => onChange({ tooltip_sort: value })}
@@ -104,20 +110,11 @@ export default function TopBar({
           deltaDisplay={state.tooltip_delta} onDeltaDisplayChange={(value) => onChange({ tooltip_delta: value })}
         /> : state.panel === "table" ? compareControls : <ImageSettings state={state} onChange={onChange} />}
         <div className="toolbar-actions">
-          {ready && !writable && <span className="read-only-indicator" title="Viewing changes stay in this browser. Saved views cannot be changed." role="status">
-            <LockSimpleIcon size={14} aria-hidden="true" /><span>Read-only</span>
-          </span>}
-          {writable && localOnly && <span className="local-save-indicator" title="Changes are saved in this browser" role="status" aria-label="Changes are saved in this browser"><CloudSlashIcon size={15} aria-hidden="true" /></span>}
+          {storageError && <span className="local-save-indicator" title={storageError} role="status" aria-label="Local settings could not be saved"><CloudSlashIcon size={15} aria-hidden="true" /></span>}
         <RefreshControl interval={state.refresh_interval} onRefresh={onRefresh} onInterval={(refresh_interval) => onChange({ refresh_interval })} />
-        <button
-          type="button"
-          className="button icon-button"
-          onClick={onThemeToggle}
-          aria-label={`Change theme, current: ${THEME_LABELS[themeMode]}`}
-          title={`Theme: ${THEME_LABELS[themeMode]}`}
-        >
-          <ThemeIcon size={16} aria-hidden="true" />
-        </button>
+        <SettingsMenu mode={mode} writable={writable} ready={ready} config={config} onMode={onMode} onImport={onImportConfig} onRestore={onRestoreRemote}>
+          <button type="button" className="menu-item theme-menu-item" onClick={onThemeToggle} aria-label={`Change theme, current: ${THEME_LABELS[themeMode]}`}><ThemeIcon size={16} aria-hidden="true" /><span>Theme: {THEME_LABELS[themeMode]}</span></button>
+        </SettingsMenu>
         </div>
       </div>
     </header>

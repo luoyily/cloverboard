@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { XIcon } from "@phosphor-icons/react";
-import { slotColor, visibleColor } from "../colors";
+import { paletteColor, visibleColor } from "../colors";
 import { paletteError, type PaletteInput, type PaletteSelection } from "../palettes";
 import ColorPicker from "./ColorPicker";
 
@@ -33,7 +33,7 @@ export default function PaletteEditor({ initial, editing, onSave, onClose }: { i
       <label>Name<input className="text-input" value={name} maxLength={60} onChange={(event) => { setName(event.target.value); setError(""); }} autoFocus /></label>
       <div className="palette-colors-heading"><span className="field-label">Ordered colors · {colors.length}/24</span><button className="button quiet-button" disabled={colors.length >= 24} onClick={() => {
         let slot = colors.length, color: string;
-        do { color = slotColor(slot++, "palette-editor", "dark"); } while (colors.some((item) => item.toLowerCase() === color));
+        do { color = paletteColor(slot++); } while (colors.some((item) => item.toLowerCase() === color));
         setColors([...colors, color]); setActive(colors.length);
       }}>Add color</button></div>
       <div className="color-choices palette-color-grid">{colors.map((color, i) => <button key={i} className="color-choice" aria-label={`Color ${i + 1}: ${color}`} aria-pressed={active === i} title={`${i + 1} · ${color}`} style={{ background: /^#[0-9a-f]{6}$/i.test(color) ? color : "transparent" }} onClick={() => setActive(i)} />)}</div>

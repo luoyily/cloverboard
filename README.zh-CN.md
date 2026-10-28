@@ -2,7 +2,23 @@
 
 一个轻量、本地优先（local-first）的实验追踪工具。每个 Run 都有自己的目录
 和 `run.sqlite`；文本保存在 SQLite 中，图片、音频和代码 ZIP 是 Run 目录下的
-普通文件。工作区观看状态和命名 View 保存在 `.workspace/workspace.sqlite`。
+普通文件。通过右上角齿轮 **Settings** 统一选择 **Remote workspace**（远程）
+或 **Local · this browser**（本地）。普通访问默认远程；只读和 share 固定本地，
+首次从远程配置初始化。当前观看设置自动保存，View 和 Colors 的库及保存、更新、
+删除操作统一使用当前模式。命名 View 是手动保存的观看快照，打开时不会覆盖配置库。
+
+观看配置包含实验勾选、筛选与排序、颜色及固定标记、Targets、Chart/Table/Media
+选项、hover 格式、图表布局和刷新间隔。缩放、光标位置、固定读数、播放进度和
+打开的弹窗属于临时交互；主题与侧栏宽度是独立的浏览器偏好。
+命名 View 保存完整观看配置。
+
+通过 **Settings → Configuration** 将当前观看设置、命名 View 和调色板一起
+导出或导入为 JSON，包含每个实验的当前颜色和固定标记。导入会生成新 ID、
+处理重名并保留已有库，在当前模式打开导入设置；远程导入在一个事务内完成。
+文件不包含实验数据。本地模式的 **Restore remote settings** 重新应用远程观看设置，
+保留本地 View 和调色板库。切换模式只加载对应设置，不会跨位置复制。
+远程配置保存在 `.workspace/workspace.sqlite`。
+浏览器存储按服务地址和浏览器配置隔离，清理存储或更换浏览器前请导出备份。
 
 > 本文是根目录 [README.md](README.md) 的中文版。命令、路径和 API 名称保持原样；
 > 如有歧义，以英文版为准。
@@ -124,6 +140,8 @@ Audio 接受 `[-1, 1]` 范围内的 float NumPy 数组、int16 数组或 PCM16 W
 
 ## 浏览
 
+- **Chart settings → Top K** 仅强调 Charts 中的曲线，不影响 Table 和 Media，
+  设置随观看配置和 View 保存。
 - **Targets** 支持每个指标保存多个命名目标，每次激活一个。可选的图表短名显示在
   左侧 Y 轴；Charts 和 Table 共用激活目标，`Δ Target` 文案保持固定。
 - 通过 Run 的 `⋯` → **Edit tags**，或在 Details → Overview 中编辑。批量增删使用
@@ -136,12 +154,14 @@ Audio 接受 `[-1, 1]` 范围内的 float NumPy 数组、int16 数组或 PCM16 W
   Bright 的 12 个基础色写死在代码中。**New palette** 复制当前配色，可修改名称、
   编辑和排序 2–24 个不重复的 HEX 颜色，也可批量粘贴颜色列表，并查看明暗背景预览。
   自定义配色先按指定顺序分配，更多 Run 或参数分组自动生成扩展色。**By parameter**
-  为每个参数值分配调色板主色，组内实验使用轻微深浅变化。切换调色板时保留分组映射，
-  以及 Random 模式的实验颜色槽位和手动指定颜色；**Continuous** 继续使用 Viridis。
+  为参数值生成调色板主色，组内实验使用轻微深浅变化；**Continuous** 继续使用 Viridis。
+  每个实验只保存一份 `{color, fixed}`，手动改色默认固定，取消固定保留当前颜色，
+  下次重新分配时才改变。切换调色板、配色模式和重新分配都保留固定颜色；
+  新实验只补充缺失颜色，不改变已有实验。
   Bright 和自定义配色在白底使用 2:1 对比度，暗底使用 3:1。
   每个工作区最多保存 32 份自定义调色板，存储于 `<logdir>/.workspace/workspace.sqlite`。
   View 和共享状态链接携带配色快照，之后编辑或删除库中的调色板不会改变已保存的颜色。
-  只读和共享模式允许选择配色，禁用编辑。
+  只读和共享模式允许在本地编辑和保存调色板。
   调色板 API 为 `GET/POST /api/workspace/palettes` 和
   `PUT/DELETE /api/workspace/palettes/{id}`，新增和更新的请求体为
   `{ "name": "My palette", "colors": ["#7ECEF4", "#EA68A2"] }`。

@@ -2,7 +2,29 @@
 
 A lightweight, local-first experiment tracker. Each run has its own directory
 and `run.sqlite`; text is stored in SQLite, while images, audio and code ZIPs are files under that run.
-Workspace viewing state and named Views live in `.workspace/workspace.sqlite`.
+**Settings** (gear) selects **Remote workspace** or **Local · this browser**.
+Normal access defaults to Remote; read-only/share access always uses Local,
+initially copied from the remote workspace. Current viewing settings save
+automatically in the chosen location. Views and Colors use that same location
+for their libraries and save/update/delete actions. Named Views are manual
+snapshots; opening one does not replace either library.
+
+Viewing settings include run selection, filters and sorting, colors and fixed
+flags, Targets, Chart/Table/Media options, hover formatting, chart layout and
+refresh interval. Zoom, pointer position, pinned readouts, playback position
+and open dialogs are temporary. Theme and sidebar width are separate browser
+preferences. Named Views capture the complete viewing settings.
+
+**Settings → Configuration** exports/imports one JSON file containing current
+viewing settings, named Views and palettes, including each run's color and fixed
+flag. Imports add copies with new IDs, rename duplicate names and open the
+imported settings in the current mode. Remote imports commit all changes together.
+Experiment data is not included. In Local mode, **Restore remote settings**
+copies the latest remote viewing settings while keeping local Views and palettes.
+Switching modes reloads that location's settings without copying across modes.
+Remote settings live in `.workspace/workspace.sqlite`. Browser storage is
+local to the server address and browser profile; export a backup before clearing
+it or moving to another browser.
 
 ## Start
 
@@ -133,6 +155,8 @@ the queue; forcibly killing a process can lose pending records.
 
 ## Browsing
 
+- **Chart settings → Top K** emphasizes curves in Charts only; Table and Media
+  are unaffected. Its settings are included in viewing configuration and Views.
 - **Targets** stores multiple named references per metric with one active target.
   An optional chart label appears beside the left Y axis; Charts and Table share
   the active threshold, and the `Δ Target` label stays fixed.
@@ -148,13 +172,17 @@ the queue; forcibly killing a process can lose pending records.
   colors, or paste a color list. Light/dark previews show the displayed colors.
   Custom palettes use their authored order, then generate extra shades for more runs
   or parameter families. In **By parameter**, each value gets a palette color and
-  runs in that family use subtle shades. Switching palettes preserves category
-  assignments and Random's run slots and manual colors. **Continuous** keeps Viridis.
+  runs in that family use subtle shades. Switching palettes regenerates colors
+  for unfixed runs. **Continuous** keeps Viridis. Each run has one saved
+  `{color, fixed}` entry; changing a color fixes it by default. Unfixing keeps its
+  current color until reassignment. Fixed colors survive palette and mode changes.
+  New runs receive colors without changing existing runs.
   Bright/custom palettes
   retain more brightness on white (2:1 contrast); dark backgrounds use 3:1.
   Up to 32 custom palettes are saved in `<logdir>/.workspace/workspace.sqlite`.
   Views and shared state links carry a palette snapshot, so later library edits or
-  deletion do not change saved colors. Read-only/share mode allows selection only.
+  deletion do not change saved colors. Read-only/share mode can edit and save
+  palettes locally.
   Library API: `GET/POST /api/workspace/palettes` and
   `PUT/DELETE /api/workspace/palettes/{id}`. Create/update bodies are
   `{ "name": "My palette", "colors": ["#7ECEF4", "#EA68A2"] }`.

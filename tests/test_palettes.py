@@ -14,11 +14,10 @@ def client_for(path, **kwargs):
     return TestClient(create_app(logdir=path, **kwargs), base_url="http://127.0.0.1")
 
 
-def test_palette_crud_restart_isolation_and_slot_preservation(tmp_path):
+def test_palette_crud_restart_and_isolation(tmp_path):
     client = client_for(tmp_path)
     assert client.get("/api/workspace/palettes").json() == []
     assert not (tmp_path / ".workspace").exists()
-    registry = client.put("/api/workspace/colors", json={"keys": ["run:a"]}).json()
     response = client.post("/api/workspace/palettes", json={**PAYLOAD, "name": " Spring "})
     assert response.status_code == 201
     palette = response.json()
@@ -26,10 +25,6 @@ def test_palette_crud_restart_isolation_and_slot_preservation(tmp_path):
     assert palette["id"].startswith("custom:")
     assert len(palette["id"]) == 39
     endpoint = f"/api/workspace/palettes/{palette['id']}"
-    allocated = client.put("/api/workspace/colors", json={"keys": ["run:b"]}).json()
-    assert allocated["seed"] == registry["seed"]
-    assert allocated["slots"]["run:a"] == registry["slots"]["run:a"]
-    assert allocated["palettes"] == [palette]
     changed = client.put(endpoint, json={"name": "Ocean", "colors": list(reversed(COLORS))})
     assert changed.status_code == 200
     changed = changed.json()
@@ -37,15 +32,11 @@ def test_palette_crud_restart_isolation_and_slot_preservation(tmp_path):
     assert changed["colors"] == list(reversed(palette["colors"]))
     restarted = client_for(tmp_path)
     assert restarted.get("/api/workspace/palettes").json() == [changed]
-    after = restarted.get("/api/workspace/colors").json()
-    assert after["slots"] == allocated["slots"]
-    assert after["seed"] == registry["seed"]
     assert client_for(tmp_path / "other").get("/api/workspace/palettes").json() == []
     assert restarted.delete(endpoint).json() == changed
     assert client_for(tmp_path).get("/api/workspace/palettes").json() == []
     assert restarted.delete(endpoint).status_code == 404
     assert restarted.put(endpoint, json=PAYLOAD).status_code == 404
-    assert restarted.get("/api/workspace/colors").json()["slots"] == allocated["slots"]
 
 
 def test_palette_snapshots_in_views_and_current_state_survive_library_changes(tmp_path):
@@ -133,13 +124,13 @@ def test_palette_selection_uses_strict_discriminated_schema(tmp_path, selection)
     assert client.post("/api/workspace/views", json={"name": "Invalid", "state": state}).status_code == 422
 
 
-def test_corrupt_registry_returns_503_without_resetting_data(tmp_path):
+def test_corrupt_palette_library_returns_503_without_resetting_data(tmp_path):
     client = client_for(tmp_path)
     client.post("/api/workspace/palettes", json=PAYLOAD)
     database = tmp_path / ".workspace" / "workspace.sqlite"
     with sqlite3.connect(database) as connection:
-        connection.execute("UPDATE color_registry SET payload='invalid JSON'")
+        connection.execute("UPDATE palette_library SET payload='invalid JSON'")
     assert client.get("/api/workspace/palettes").status_code == 503
     assert client.post("/api/workspace/palettes", json=PAYLOAD).status_code == 503
     with sqlite3.connect(database) as connection:
-        assert connection.execute("SELECT payload FROM color_registry").fetchone()[0] == "invalid JSON"
+        assert connection.execute("SELECT payload FROM palette_library").fetchone()[0] == "invalid JSON"

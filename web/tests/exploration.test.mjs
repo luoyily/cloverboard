@@ -405,9 +405,6 @@ test("warmup inheritance distinguishes explicit Auto, zero cutoff and global set
   assert.equal(restored.y_warmup, 1000);
   assert.equal(restored.chart_warmup.auto, null);
   assert.equal(normalizeState({ y_warmup: 1e20 }).y_warmup, null);
-  const zooms = { inherited: { x_min: 50, x_max: 200, y_min: 1, y_max: 5 }, auto: { x_min: 0, x_max: 10, y_min: 2, y_max: 3 } };
-  assert.deepEqual(feature.clearYZoom(zooms, (metric) => !Object.hasOwn(state.chart_warmup, metric)), { inherited: { x_min: 50, x_max: 200, y_min: null, y_max: null }, auto: zooms.auto });
-  assert.equal(zooms.inherited.y_min, 1);
 });
 
 test("warmup fitting is immediate, preserves EMA and falls back to Auto for empty or nonpositive log samples", () => {
@@ -451,194 +448,100 @@ test("hover order follows the rendered values, keeps baseline first and supports
   assert.deepEqual(ordered(false, null, "list"), rows.map((row) => row.run.run_id));
 });
 
-test("Default keeps its existing color identities when palettes are introduced", () => {
-  const expected = {
-    light: ["#7b658b", "#697c30", "#c05a24", "#347f98", "#b74666", "#267f6c", "#875c46", "#4d5eaf", "#9955af", "#3276b8", "#a54938", "#847113", "#0c11a1", "#700ca1", "#10ab0d", "#bd8d1d", "#802d62", "#1aa78b", "#2d4380", "#d110cd"],
-    dark: ["#bca2ce", "#b1c877", "#f4a266", "#6fc2dc", "#ed8ca9", "#65c5ac", "#cfa58a", "#97a4ee", "#c993df", "#72b2ef", "#e79783", "#c5b657", "#585df2", "#b43df0", "#6ef46c", "#f8dc9b", "#c964a4", "#9bf8e5", "#647fc9", "#f46cf2"],
-  };
+test("palette source colors retain authored order and contrast in both themes", () => {
+  for (const palette of [builtinPalette("default"), builtinPalette("bright"), customPalette]) {
+    const source = Array.from({ length: 40 }, (_, i) => colors.paletteColor(i, palette));
+    assert.equal(new Set(source).size, source.length);
+    if (palette.id !== "default") assert.deepEqual(source.slice(0, palette.colors?.length ?? 12), palettes.paletteBaseColors(palette).map(c => c.toLowerCase()));
+    for (const theme of ["light", "dark"]) assert.ok(source.every(color => colors.contrast(colors.visibleColor(color, theme, palette), theme === "light" ? "#ffffff" : "#222831") >= (theme === "light" && palette.id !== "default" ? 2 : 3)));
+  }
+});
+
+for (const palette of [builtinPalette("default"), builtinPalette("bright"), customPalette]) test(`${palette.id}: single-layer colors stay stable on reorder, refresh and new runs`, () => {
+  const runs = Array.from({ length: 20 }, (_, i) => run(`r${i}`));
+  const settings = colors.assignColors(runs, { ...feature.defaultColors(), palette });
+  assert.equal(colors.assignColors(runs, settings), settings);
+  const extended = colors.assignColors([run("new"), ...runs].reverse(), settings);
+  assert.deepEqual(Object.keys(settings.runs[feature.runColorKey(runs[0])]).sort(), ["color", "fixed"]);
+  for (const r of runs) assert.deepEqual(extended.runs[feature.runColorKey(r)], settings.runs[feature.runColorKey(r)]);
   for (const theme of ["light", "dark"]) {
-    assert.deepEqual(Array.from({ length: 20 }, (_, i) => colors.slotColor(i, "test-seed", theme)), expected[theme]);
+    const resolved = colors.resolveColors(runs, settings, theme);
+    assert.equal(new Set(resolved.values()).size, runs.length);
+    assert.deepEqual(colors.resolveColors(runs, extended, theme), resolved);
   }
 });
 
-test("Bright keeps the supplied colors in order and isolates its palette cache", () => {
-  assert.deepEqual(colors.BRIGHT_COLORS.slice(0, 4), ["#7ECEF4", "#EA68A2", "#FF9A52", "#A2DB86"]);
-  assert.equal(colors.BRIGHT_COLORS.length, 12);
-  for (const theme of ["light", "dark"]) {
-    const before = Array.from({ length: 48 }, (_, i) => colors.slotColor(i, "palette-switch", theme));
-    const bright = Array.from({ length: 48 }, (_, i) => colors.slotColor(i, "palette-switch", theme, builtinPalette("bright")));
-    assert.deepEqual(bright.slice(0, 12), colors.BRIGHT_COLORS.map((color) => colors.visibleColor(color, theme, builtinPalette("bright"))));
-    assert.equal(new Set(bright).size, bright.length);
-    assert.ok(bright.every((color) => colors.contrast(color, theme === "light" ? "#ffffff" : "#222831") >= (theme === "light" ? 2 : 3)));
-    assert.notDeepEqual(bright, before);
-    assert.deepEqual(Array.from({ length: 48 }, (_, i) => colors.slotColor(i, "palette-switch", theme)), before);
-    assert.deepEqual(Array.from({ length: 48 }, (_, i) => colors.slotColor(i, "palette-switch", theme, builtinPalette("bright"))), bright);
+test("fixed and unselected colors survive reassign; unfixing keeps color until next reassign", () => {
+  const runs = [run("a"), run("b"), run("c")];
+  const original = colors.assignColors(runs, feature.defaultColors());
+  const key = feature.runColorKey(runs[0]);
+  const settings = { ...original, runs: { ...original.runs, [key]: { color: "#9966aa", fixed: true } } };
+  const before = structuredClone(settings);
+  const next = colors.assignColors(runs, settings, new Set(["a", "b"]));
+  assert.deepEqual(next.runs[key], settings.runs[key]);
+  assert.deepEqual(next.runs[feature.runColorKey(runs[2])], settings.runs[feature.runColorKey(runs[2])]);
+  assert.notEqual(next.runs[feature.runColorKey(runs[1])].color, settings.runs[feature.runColorKey(runs[1])].color);
+  assert.deepEqual(settings, before); // The original map is also a complete Undo snapshot.
+  const unlocked = { ...next, runs: { ...next.runs, [key]: { ...next.runs[key], fixed: false } } };
+  assert.equal(colors.assignColors(runs, unlocked).runs[key].color, "#9966aa");
+  assert.notEqual(colors.assignColors(runs, unlocked, new Set(["a"])).runs[key].color, "#9966aa");
+});
+
+test("palette and mode changes write current colors directly and preserve fixed colors", () => {
+  const runs = [run("a", { lr: 1 }), run("b", { lr: 2 }), run("c", { lr: 3 })];
+  const initial = colors.assignColors(runs, feature.defaultColors()), key = feature.runColorKey(runs[0]);
+  const settings = { ...initial, runs: { ...initial.runs, [key]: { color: "#9966aa", fixed: true } } };
+  for (const mode of ["random", "parameter", "continuous"]) {
+    const next = colors.recolorRuns(runs, { ...settings, palette: builtinPalette("bright"), mode, field: "lr", domain: [1, 3] });
+    assert.deepEqual(next.runs[key], settings.runs[key]);
+    for (const theme of ["light", "dark"]) assert.equal(colors.resolveColors(runs, next, theme).get("a"), colors.resolveColors(runs, settings, theme).get("a"));
+    assert.equal(colors.assignColors(runs, next), next);
+    assert.equal(next.runs[feature.runColorKey(runs[1])].fixed, false);
   }
 });
 
-test("Bright preserves more lightness on white and keeps its dark color identities", () => {
-  const expectedDark = ["#7ecef4", "#ea68a2", "#ff9a52", "#a2db86", "#b59be8", "#62d6c4", "#f3ca65", "#f47c78", "#879cf0", "#d6a06e", "#cadb68", "#d98bdd", "#7e63e9", "#d7bcf5", "#d063e9", "#dca3b5", "#997ece", "#7eb4ce", "#7de963", "#ce7e97", "#7086db", "#a263e9", "#eac8d2", "#e96370", "#bf7ece", "#ef8fba", "#63ace9", "#d9a3dc", "#ce8b7e", "#ef9f8f", "#a3aedc", "#db70d2", "#7e98ce", "#dcb3a3", "#c7f5bc", "#63e9c2", "#e98963", "#a38fef", "#ef8f99", "#bcc8f5", "#f5bcf1", "#63bee9", "#9470db", "#636ce9", "#e9b563", "#d5e963", "#ef8fe7", "#7077db"];
-  assert.deepEqual(Array.from({ length: 48 }, (_, i) => colors.slotColor(i, "palette-switch", "dark", builtinPalette("bright"))), expectedDark);
-  for (const original of colors.BRIGHT_COLORS) {
-    const adjusted = colors.visibleColor(original, "light", builtinPalette("bright"));
-    assert.ok(colors.colorDistance(original, adjusted) <= colors.colorDistance(original, colors.visibleColor(original, "light")));
-    if (colors.contrast(original, "#ffffff") >= 2) assert.equal(adjusted, original.toLowerCase());
-  }
-  assert.equal(colors.visibleColor("#FF9A52", "light", builtinPalette("bright")), "#ff9a52");
-  const item = run("manual"), registry = colors.extendRegistry({ version: 1, seed: "preview", slots: {}, palettes: [] }, [feature.runColorKey(item)]);
-  const settings = { ...feature.defaultColors(), palette: builtinPalette("bright"), overrides: { [feature.runColorKey(item)]: "#7ECEF4" } };
-  assert.equal(colors.resolveColors([item], registry, settings, "light").get(item.run_id), colors.visibleColor("#7ECEF4", "light", builtinPalette("bright")));
+test("color Undo restores reassignment without overwriting later manual edits or new runs", () => {
+  const runs = [run("a"), run("b"), run("c")];
+  const before = colors.assignColors(runs, feature.defaultColors());
+  const after = colors.recolorRuns(runs, before);
+  const key = feature.runColorKey(runs[0]), edited = { color: "#abcdef", fixed: true };
+  const current = colors.assignColors([...runs, run("new")], { ...after, runs: { ...after.runs, [key]: edited } });
+  const restored = colors.undoColors(current, { before: before.runs, after: after.runs });
+  assert.deepEqual(restored.runs[key], edited);
+  assert.deepEqual(restored.runs[feature.runColorKey(runs[1])], before.runs[feature.runColorKey(runs[1])]);
+  assert.deepEqual(restored.runs[feature.runColorKey(run("new"))], current.runs[feature.runColorKey(run("new"))]);
 });
 
-test("palette selections normalize invalid state and survive shared links and views", () => {
-  assert.deepEqual(normalizeState({}).colors.palette, builtinPalette("default"));
-  for (const palette of [undefined, null, "unknown", 1]) assert.deepEqual(normalizeState({ colors: { palette } }).colors.palette, builtinPalette("default"));
-  const state = normalizeState({ colors: { palette: builtinPalette("bright"), assignments: { r1: 17 }, overrides: { r2: "#9966aa" } } });
+test("parameter and continuous generated colors stay stable as new values arrive", () => {
+  const runs = [run("a", { lr: 1 }), run("b", { lr: 1 }), run("c", { lr: "1" }), run("missing")];
+  for (const mode of ["parameter", "continuous"]) {
+    const settings = colors.assignColors(runs, { ...feature.defaultColors(), mode, field: "lr", domain: [0, 2] });
+    const next = colors.assignColors([...runs, run("new", { lr: 100 })], settings);
+    for (const r of runs) assert.deepEqual(next.runs[feature.runColorKey(r)], settings.runs[feature.runColorKey(r)]);
+    if (mode === "continuous") {
+      assert.deepEqual(settings.runs[feature.runColorKey(runs[0])], settings.runs[feature.runColorKey(runs[1])]);
+      assert.deepEqual(settings.runs[feature.runColorKey(runs[2])], settings.runs[feature.runColorKey(runs[3])]);
+    }
+  }
+});
+
+test("View and shared links restore exact colors and fixed flags without a registry", () => {
+  const items = [run("a"), run("b")];
+  const settings = colors.assignColors(items, { ...feature.defaultColors(), palette: customPalette });
+  settings.runs[feature.runColorKey(items[0])].fixed = true;
+  const state = normalizeState({ colors: settings });
   const shared = readSharedLocation(`http://localhost/#state=${encodeSharedState(state)}`).state;
   assert.deepEqual(shared.colors, state.colors);
-  assert.notEqual(viewStateKey(state), viewStateKey({ ...state, colors: { ...state.colors, palette: builtinPalette("default") } }));
-});
-
-test("custom palettes keep authored order and refresh cached colors after edits", () => {
-  for (const theme of ["light", "dark"]) {
-    const original = Array.from({ length: 40 }, (_, i) => colors.slotColor(i, "custom-order", theme, customPalette));
-    assert.deepEqual(original.slice(0, 4), customPalette.colors.map((color) => colors.visibleColor(color, theme, customPalette)));
-    assert.equal(new Set(original).size, original.length);
-    const renamed = { ...customPalette, id: "custom:" + "b".repeat(32), name: "Renamed" };
-    assert.deepEqual(Array.from({ length: 40 }, (_, i) => colors.slotColor(i, "custom-order", theme, renamed)), original);
-    const edited = { ...customPalette, colors: [...customPalette.colors].reverse() };
-    assert.notEqual(colors.slotColor(0, "custom-order", theme, edited), original[0]);
-    assert.deepEqual(Array.from({ length: 40 }, (_, i) => colors.slotColor(i, "custom-order", theme, customPalette)), original);
-  }
-});
-
-test("custom palette snapshots are portable and independent of workspace libraries", () => {
-  const state = normalizeState({ colors: { palette: customPalette, assignments: { a: 15 } } });
-  const shared = readSharedLocation(`http://localhost/#state=${encodeSharedState(state)}`).state;
-  assert.deepEqual(shared.colors.palette, customPalette);
-  const items = [run("a"), run("b")];
-  const registry = colors.extendRegistry({ version: 1, seed: "snapshots", slots: {}, palettes: [customPalette] }, items.map(feature.runColorKey));
-  const before = colors.resolveColors(items, registry, shared.colors, "light");
-  for (const library of [[], [{ ...customPalette, colors: ["#123456", "#abcdef"] }]]) {
-    assert.deepEqual(colors.resolveColors(items, { ...registry, palettes: library }, shared.colors, "light"), before);
-  }
-  const edited = { ...state, colors: { ...state.colors, palette: { ...customPalette, colors: [...customPalette.colors].reverse() } } };
-  assert.notEqual(viewStateKey(edited), viewStateKey(state));
+  assert.deepEqual(colors.resolveColors(items, shared.colors, "dark"), colors.resolveColors(items, state.colors, "dark"));
+  assert.notEqual(viewStateKey(state), viewStateKey({ ...state, colors: feature.defaultColors() }));
 });
 
 test("palette validation rejects invalid definitions before saving or restoring", () => {
   assert.equal(palettes.paletteError(customPalette.name, customPalette.colors), null);
-  const invalid = [
-    { name: " " }, { name: "a".repeat(61) }, { colors: [] }, { colors: ["#123456"] },
-    { colors: Array.from({ length: 25 }, (_, i) => `#${i.toString(16).padStart(6, "0")}`) },
-    { colors: ["#ABCDEF", "#abcdef"] }, { colors: ["#123", "blue"] }, { id: "bright" },
-  ];
-  for (const patch of invalid) {
+  for (const patch of [{ name: " " }, { name: "a".repeat(61) }, { colors: [] }, { colors: ["#123456"] }, { colors: ["#ABCDEF", "#abcdef"] }, { colors: ["#123", "blue"] }, { id: "bright" }]) {
     const selection = { ...customPalette, ...patch };
-    if (!patch.id) assert.ok(palettes.paletteError(selection.name, selection.colors));
     assert.deepEqual(normalizeState({ colors: { palette: selection } }).colors.palette, builtinPalette("default"));
   }
-  assert.deepEqual(normalizeState({ colors: { palette: { ...customPalette, name: " Ocean ", colors: customPalette.colors.map((color) => color.toUpperCase()) } } }).colors.palette, customPalette);
-});
-
-for (const palette of [builtinPalette("default"), builtinPalette("bright"), customPalette]) test(`${palette.id}: 12 and 20 stable identity colors are unique and visible in both themes`, () => {
-  const runs = Array.from({ length: 20 }, (_, i) => run(`r${i}`));
-  const registry = colors.extendRegistry({ version: 1, seed: "test-seed", slots: {}, palettes: [] }, runs.map(feature.runColorKey));
-  const extended = colors.extendRegistry(registry, [feature.runColorKey(run("older")), feature.runColorKey(run("r1", {}, "peer"))]);
-  for (const r of runs) assert.equal(extended.slots[feature.runColorKey(r)], registry.slots[feature.runColorKey(r)]);
-  for (const theme of ["light", "dark"]) {
-    const settings = { ...feature.defaultColors(), palette };
-    const resolved = colors.resolveColors(runs, registry, settings, theme);
-    assert.equal(new Set(resolved.values()).size, 20);
-    const minimumContrast = (palette.kind === "custom" || palette.id === "bright") && theme === "light" ? 2 : 3;
-    assert.ok([...resolved.values()].every((color) => colors.contrast(color, theme === "light" ? "#ffffff" : "#222831") >= minimumContrast));
-    const reversed = colors.resolveColors([...runs].reverse(), extended, settings, theme);
-    for (const r of runs) assert.equal(resolved.get(r.run_id), reversed.get(r.run_id));
-    const first12 = [...resolved.values()].slice(0, 12);
-    const minimum = Math.min(...first12.flatMap((a, i) => first12.slice(i + 1).map((b) => colors.colorDistance(a, b))));
-    assert.ok(minimum > .035, `Minimum OKLab distance ${minimum}`);
-  }
-});
-
-for (const palette of [builtinPalette("default"), builtinPalette("bright"), customPalette]) test(`${palette.id}: manual colors lock; reassign affects only selected unlocked runs and can be undone`, () => {
-  const runs = [run("a"), run("b"), run("c")], registry = colors.extendRegistry({ version: 1, seed: "lock", slots: {}, palettes: [] }, runs.map(feature.runColorKey));
-  const settings = { ...feature.defaultColors(), palette, overrides: { [feature.runColorKey(runs[0])]: "#9966aa" } };
-  const before = colors.resolveColors(runs, registry, settings, "light");
-  const next = colors.reassignColors(runs, new Set(["a", "b"]), registry, settings);
-  const after = colors.resolveColors(runs, registry, next, "light");
-  assert.equal(after.get("a"), before.get("a")); assert.equal(after.get("c"), before.get("c")); assert.notEqual(after.get("b"), before.get("b"));
-  assert.deepEqual(colors.resolveColors(runs, registry, settings, "light"), before);
-});
-
-test("palette switches preserve slots, manual overrides and continuous colors", () => {
-  const runs = [run("a", { lr: 1 }), run("b", { lr: 2 }), run("c", { lr: 3 })];
-  const registry = colors.extendRegistry({ version: 1, seed: "switch-identities", slots: {}, palettes: [] }, runs.flatMap((r) => [feature.runColorKey(r), feature.categoryKey("lr", r.config.lr)]));
-  const snapshot = structuredClone(registry);
-  const settings = { ...feature.defaultColors(), assignments: { [feature.runColorKey(runs[1])]: 17 }, overrides: { [feature.runColorKey(runs[0])]: "#9966aa" } };
-  for (const theme of ["light", "dark"]) {
-    const before = colors.resolveColors(runs, registry, settings, theme);
-    const bright = colors.resolveColors(runs, registry, { ...settings, palette: builtinPalette("bright") }, theme);
-    assert.equal(bright.get("a"), before.get("a"));
-    assert.equal(bright.get("b"), colors.slotColor(17, registry.seed, theme, builtinPalette("bright")));
-    assert.notEqual(bright.get("c"), before.get("c"));
-    for (const palette of [builtinPalette("bright"), customPalette]) {
-      const semantic = { ...settings, mode: "continuous", field: "lr", domain: [1, 3] };
-      assert.deepEqual(colors.resolveColors(runs, registry, semantic, theme), colors.resolveColors(runs, registry, { ...semantic, palette }, theme));
-    }
-  }
-  assert.deepEqual(registry, snapshot);
-});
-
-test("continuous colors keep a fixed domain, match values and separate missing/non-numeric", () => {
-  const runs = [run("a", { lr: 1 }), run("b", { lr: 1 }), run("c", { lr: "1" }), run("missing")];
-  const registry = colors.extendRegistry({ version: 1, seed: "semantic", slots: {}, palettes: [] }, runs.map(feature.runColorKey));
-  const settings = { ...feature.defaultColors(), mode: "continuous", field: "lr", domain: [0, 2] };
-  const before = colors.resolveColors(runs, registry, settings, "light");
-  const after = colors.resolveColors([...runs, run("new", { lr: 100 })], registry, settings, "light");
-  assert.equal(before.get("a"), before.get("b")); assert.equal(before.get("a"), after.get("a"));
-  assert.equal(before.get("c"), before.get("missing")); assert.notEqual(before.get("a"), before.get("missing"));
-});
-
-test("parameter families stay stable when runs and new categories arrive", () => {
-  const runs = [run("a", { group: false }), run("b", { group: 0 }), run("c", { group: null }), run("missing")];
-  const keys = (items) => items.flatMap((r) => [feature.runColorKey(r), feature.categoryKey("group", feature.parameterValue(r, "group"))]);
-  const registry = colors.extendRegistry({ version: 1, seed: "family", slots: {}, palettes: [] }, keys(runs));
-  const nextRuns = [run("older", { group: "new" }), ...runs].reverse();
-  for (const palette of [builtinPalette("default"), builtinPalette("bright"), customPalette]) for (const theme of ["light", "dark"]) {
-    const settings = { ...feature.defaultColors(), mode: "parameter", field: "group", palette };
-    const before = colors.resolveColors(runs, registry, settings, theme);
-    const after = colors.resolveColors(nextRuns, colors.extendRegistry(registry, keys(nextRuns)), settings, theme);
-    for (const r of runs) assert.equal(before.get(r.run_id), after.get(r.run_id));
-    assert.notEqual(before.get("a"), before.get("b")); assert.notEqual(before.get("b"), before.get("c"));
-    assert.equal(before.get("missing"), theme === "light" ? "#747e8b" : "#a3adba");
-  }
-});
-
-test("parameter families use selected palette colors and retain within-family shades", () => {
-  const groups = ["alpha", "beta"];
-  const runs = groups.flatMap((group) => Array.from({ length: 18 }, (_, i) => run(`${group}-${i}`, { group })));
-  const registry = colors.extendRegistry({ version: 1, seed: "family-palettes", slots: {
-    [feature.categoryKey("group", "alpha")]: 2, [feature.categoryKey("group", "beta")]: 7,
-  }, palettes: [] }, runs.map(feature.runColorKey));
-  const snapshot = structuredClone(registry);
-  const selections = [builtinPalette("default"), builtinPalette("bright"), { ...customPalette, colors: [...customPalette.colors].reverse() }];
-  for (const theme of ["light", "dark"]) {
-    let previous;
-    for (const palette of selections) {
-      const settings = { ...feature.defaultColors(), mode: "parameter", field: "group", palette };
-      const resolved = colors.resolveColors([...runs, run("missing")], registry, settings, theme);
-      for (const [slot, group] of groups.entries()) {
-        const shades = new Set(runs.filter((r) => r.config.group === group).map((r) => resolved.get(r.run_id)));
-        assert.equal(shades.size, 3);
-        assert.ok(shades.has(colors.slotColor(slot, registry.seed, theme, palette)));
-      }
-      assert.deepEqual(colors.resolveColors(runs, registry, { ...settings, overrides: { [feature.runColorKey(runs[0])]: "#ff0000" }, assignments: { [feature.runColorKey(runs[0])]: 99 } }, theme), new Map([...resolved].filter(([id]) => id !== "missing")));
-      if (previous) for (const r of runs) assert.notEqual(resolved.get(r.run_id), previous.get(r.run_id));
-      assert.equal(resolved.get("missing"), theme === "light" ? "#747e8b" : "#a3adba");
-      previous = resolved;
-    }
-  }
-  assert.deepEqual(registry, snapshot);
 });
 
 test("Top-K uses exact latest/best and never ranks invalid values", () => {

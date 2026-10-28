@@ -370,7 +370,7 @@ code {
   min-height: calc(var(--workspace-header-height) - 1px);
 }
 
-.toolbar-left { flex: 1; }
+.toolbar-left { flex: 1; min-width: min-content; }
 .toolbar-right { margin-left: auto; gap: 12px; }
 .workspace-tabs { display: flex; align-self: stretch; gap: 16px; flex: none; }
 .workspace-tabs button {
@@ -495,7 +495,6 @@ button:disabled { cursor: default; opacity: 0.45; }
 .smoothing-slider:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
 .delta-options { display: flex; gap: 20px; }
 .delta-options .check-control { font-size: 12px; }
-.display-menu .menu-popover { max-height: calc(100dvh - 80px); overflow-y: auto; }
 .refresh-control { display: flex; align-items: center; gap: 0; }
 .refresh-menu .popover-trigger { padding: 0 4px; height: 32px; min-width: 24px; font-size: 11px; }
 
@@ -622,7 +621,7 @@ button:disabled { cursor: default; opacity: 0.45; }
   background: var(--surface);
   box-shadow: var(--popover-shadow);
 }
-.toolbar-left > .views-menu { max-width: 180px; padding-left: 14px; border-left: 1px solid var(--border); }
+.toolbar-left > .views-menu { min-width: 96px; max-width: 180px; padding-left: 14px; border-left: 1px solid var(--border); }
 .views-menu > .popover-trigger { max-width: 100%; }
 .views-menu .menu-popover { left: 0; right: auto; }
 .view-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -650,6 +649,11 @@ button:disabled { cursor: default; opacity: 0.45; }
 .menu-item svg { flex: none; color: var(--accent); }
 .menu-item:hover:not(:disabled) { background: var(--hover); }
 .saved-view-list { max-height: 240px; overflow-y: auto; scrollbar-width: thin; }
+.views-menu .menu-popover { max-height: calc(100dvh - 80px); overflow-y: auto; }
+.general-settings-menu .menu-popover { width: 300px; max-height: calc(100dvh - 80px); overflow-y: auto; }
+.config-transfer-actions { margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--border); }
+.settings-mode { display: grid; gap: 6px; padding: 4px 8px; font-size: 12px; color: var(--text-muted); }
+.theme-menu-item { justify-content: flex-start; gap: 8px; }
 .view-save-actions { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 4px; }
 .view-save-form { padding: 6px 8px; }
 .view-save-form label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-muted); }
@@ -925,6 +929,7 @@ select.text-input option, select.text-input optgroup { background: var(--surface
 .appearance-dialog::backdrop { background: #151e2b38; }
 .appearance-dialog .dialog-title { flex: none; padding-top: 4px; }
 .appearance-dialog .settings-form { gap: 8px; }
+.settings-form label.checkbox-label { flex-direction: row; align-items: center; gap: 8px; color: var(--text); }
 .appearance-body { min-height: 0; overflow-y: auto; scrollbar-width: thin; padding-top: 12px; }
 .appearance-footer { display: flex; justify-content: flex-end; gap: 6px; flex: none; padding: 10px 8px 0; border-top: 1px solid var(--border); }
 .appearance-footer .reset-color-button { margin-right: auto; padding: 0; font-size: 11px; }
@@ -1037,7 +1042,6 @@ select.text-input option, select.text-input optgroup { background: var(--surface
 .first-hit-label { color: var(--text-muted); }
 .compare-table tbody .metric-cell { padding-top: 8px; padding-bottom: 8px; }
 .compare-table .run-focused > * { background: var(--hover); }
-.ranked-muted td, .ranked-muted .compare-run-name { color: var(--text-muted); }
 
 .run-name { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; }
 .run-name-primary { display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; }

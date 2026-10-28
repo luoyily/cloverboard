@@ -1,6 +1,6 @@
 import type { RunSummary, ScalarPoint, ScalarSummary } from "./api";
 import { flattenConfig, stableValue } from "./comparison";
-import { DEFAULT_PALETTE, type CustomPalette, type PaletteSelection } from "./palettes";
+import { DEFAULT_PALETTE, type PaletteSelection } from "./palettes";
 
 export interface Target { value: number; direction: "gte" | "lte" }
 export type TimeDisplay = "hidden" | "elapsed" | "wall";
@@ -21,23 +21,19 @@ export function effectiveWarmup(override: number | null | undefined, global: num
   return (override === undefined ? global : override) ?? undefined;
 }
 
-export function clearYZoom(zooms: Record<string, ChartZoom>, metrics: (metric: string) => boolean): Record<string, ChartZoom> {
-  return Object.fromEntries(Object.entries(zooms).map(([metric, zoom]) => [metric, metrics(metric) ? { ...zoom, y_min: null, y_max: null } : zoom]));
-}
 export interface TopK { enabled: boolean; metric: string; direction: "min" | "max"; readout: "latest" | "best"; k: number }
+export interface RunColor { color: string; fixed: boolean }
 export interface ColorSettings {
   mode: "random" | "parameter" | "continuous";
   palette: PaletteSelection;
   field: string;
   domain: [number, number];
-  overrides: Record<string, string>;
-  assignments: Record<string, number>;
+  runs: Record<string, RunColor>;
   top_k: TopK;
 }
-export interface ColorRegistry { version: 1; seed: string; slots: Record<string, number>; palettes: CustomPalette[] }
 
 export function defaultColors(): ColorSettings {
-  return { mode: "random", palette: { ...DEFAULT_PALETTE }, field: "", domain: [0, 1], overrides: {}, assignments: {}, top_k: { enabled: false, metric: "", direction: "max", readout: "latest", k: 3 } };
+  return { mode: "random", palette: { ...DEFAULT_PALETTE }, field: "", domain: [0, 1], runs: {}, top_k: { enabled: false, metric: "", direction: "max", readout: "latest", k: 3 } };
 }
 
 export function runColorKey(run: RunSummary): string { return `run:${JSON.stringify([run.source, run.run_id])}`; }

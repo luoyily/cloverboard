@@ -5,10 +5,11 @@ import Popover from "./Popover";
 import CheckControl from "./CheckControl";
 import SegmentedControl from "./SegmentedControl";
 import WarmupControl from "./WarmupControl";
-import type { TimeDisplay, DeltaDisplay } from "../features";
+import type { TimeDisplay, DeltaDisplay, TopK } from "../features";
 import type { ReadoutPlacement } from "../readout";
 
 interface ChartToolbarProps {
+  metrics: string[]; topK: TopK; onTopKChange: (value: TopK) => void;
   metricFilter: string; onMetricFilterChange: (value: string) => void;
   density: "normal" | "compact"; onDensityChange: (value: "normal" | "compact") => void;
   showLegend: boolean; onShowLegendChange: (value: boolean) => void;
@@ -22,12 +23,13 @@ interface ChartToolbarProps {
   deltaDisplay: DeltaDisplay; onDeltaDisplayChange: (value: DeltaDisplay) => void;
 }
 
-export default function ChartToolbar({ metricFilter, onMetricFilterChange, density, onDensityChange, showLegend, onShowLegendChange, yScale, onYScaleChange, warmup, onWarmupChange, smoothing, onSmoothingChange, tooltipDecimals, onTooltipDecimalsChange, tooltipSort, onTooltipSortChange, tooltipPlacement, onTooltipPlacementChange, timeDisplay, onTimeDisplayChange, deltaDisplay, onDeltaDisplayChange }: ChartToolbarProps) {
+export default function ChartToolbar({ metrics, topK, onTopKChange, metricFilter, onMetricFilterChange, density, onDensityChange, showLegend, onShowLegendChange, yScale, onYScaleChange, warmup, onWarmupChange, smoothing, onSmoothingChange, tooltipDecimals, onTooltipDecimalsChange, tooltipSort, onTooltipSortChange, tooltipPlacement, onTooltipPlacementChange, timeDisplay, onTimeDisplayChange, deltaDisplay, onDeltaDisplayChange }: ChartToolbarProps) {
   const showBase = deltaDisplay === "baseline" || deltaDisplay === "both";
   const showTarget = deltaDisplay === "target" || deltaDisplay === "both";
   function setDelta(baseline: boolean, target: boolean) {
     onDeltaDisplayChange(baseline && target ? "both" : baseline ? "baseline" : target ? "target" : "hidden");
   }
+  function patchTopK(patch: Partial<TopK>) { onTopKChange({ ...topK, ...patch }); }
   return <Popover className="chart-settings-menu" label={`Chart settings, smoothing: ${smoothing.toFixed(2)}`} trigger={<><SlidersHorizontalIcon size={16} aria-hidden="true" /><span>Chart settings</span><CaretDownIcon size={12} aria-hidden="true" /></>}>
     <div className="menu-heading">Charts</div>
     <div className="settings-form compact-settings">
@@ -41,6 +43,15 @@ export default function ChartToolbar({ metricFilter, onMetricFilterChange, densi
       <input id="smoothing-weight" className="smoothing-slider" type="range" min={0} max={.95} step={.05} value={smoothing} style={{ "--range-fill": `${smoothing / .95 * 100}%` } as CSSProperties} onChange={(event) => onSmoothingChange(Number(event.target.value))} />
       <p className="field-help">0 shows raw values. Y range keeps all steps visible.</p>
     </div>
+    <details className="settings-section"><summary>Top K</summary><div className="settings-form compact-settings">
+      <CheckControl checked={topK.enabled} onChange={(enabled) => patchTopK({ enabled, metric: topK.metric || metrics[0] || "" })}>Emphasize Top-K</CheckControl>
+      {topK.enabled && <>
+        <label className="setting-row"><span>Metric</span><Select aria-label="Top-K metric" value={topK.metric} onChange={(event) => patchTopK({ metric: event.target.value })}>{metrics.map((metric) => <option key={metric}>{metric}</option>)}{!metrics.includes(topK.metric) && <option value={topK.metric}>{topK.metric || "No metrics"}</option>}</Select></label>
+        <div className="setting-row"><span className="field-label">Direction</span><SegmentedControl label="Top-K direction" value={topK.direction} options={[{ value: "max", label: "Higher" }, { value: "min", label: "Lower" }]} onChange={(direction) => patchTopK({ direction })} /></div>
+        <div className="setting-row"><span className="field-label">Readout</span><SegmentedControl label="Top-K readout" value={topK.readout} options={[{ value: "latest", label: "Latest raw" }, { value: "best", label: "Best raw" }]} onChange={(readout) => patchTopK({ readout })} /></div>
+        <label className="setting-row"><span>Runs</span><input type="number" className="text-input number-input" aria-label="Runs to emphasize" min={1} max={1000} value={topK.k} onChange={(event) => { const k = Number(event.target.value); if (event.target.value && Number.isInteger(k) && k > 0 && k <= 1000) patchTopK({ k }); }} /></label>
+      </>}
+    </div></details>
     <details className="settings-section"><summary>Hover</summary><div className="settings-form compact-settings">
       <div className="setting-row"><span className="field-label">Placement</span><SegmentedControl label="Hover placement" value={tooltipPlacement} options={[{ value: "vertical", label: "Vertical first" }, { value: "horizontal", label: "Horizontal first" }]} onChange={onTooltipPlacementChange} /></div>
       <label className="setting-row"><span>Decimals</span><input className="text-input number-input" type="number" aria-label="Hover decimal places" min={0} max={8} value={tooltipDecimals} onChange={(event) => { const value = Number(event.target.value); if (event.target.value && Number.isInteger(value) && value >= 0 && value <= 8) onTooltipDecimalsChange(value); }} /></label>

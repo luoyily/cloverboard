@@ -3,7 +3,8 @@ import { fetchMetrics, fetchRunsWithEtag, fetchSummary, fetchSources, pooledResu
 import { RequestCache } from "./dataCache";
 import { applyTheme, loadThemeMode, nextThemeMode, resolveTheme, saveThemeMode, type ResolvedTheme, type ThemeMode } from "./theme";
 import { defaultMetricColumns, flattenConfig, parameterColumns } from "./comparison";
-import { useWorkspace, type WorkspaceState } from "./workspace";
+import type { WorkspaceState } from "./workspace";
+import { useWorkspace } from "./useWorkspace";
 import { topRunIds } from "./features";
 import { activeTarget } from "./targets";
 import { recentRunIds, replaceSelection, selectionPatch, sortRuns } from "./runSelection";
@@ -40,6 +41,9 @@ export default function App() {
   const [appearance, setAppearance] = useState<RunSummary | null>(null);
   const [tagRuns, setTagRuns] = useState<RunSummary[] | null>(null);
   const [baselineUndo, setBaselineUndo] = useState<string | null>(null);
+  useEffect(() => {
+    setFocusedId(null); setAppearance(null); setDetailsRun(null); setTagRuns(null); setBaselineUndo(null);
+  }, [workspace.contextVersion]);
   const [themeMode, setThemeMode] = useState<ThemeMode>(loadThemeMode);
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => resolveTheme(loadThemeMode()));
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -73,7 +77,8 @@ export default function App() {
   const metricFields = useMemo(() => [...new Map(selectedRuns.flatMap((run) => catalogs.get(run.run_id)?.fields ?? []).map((field) => [field.metric, field])).values()].sort((a, b) => a.metric.localeCompare(b.metric)), [selectionKey, catalogs]);
   const metrics = useMemo(() => metricFields.map((field) => field.metric).sort(), [metricFields]);
   const catalogReady = selectedRuns.every((run) => catalogs.get(run.run_id)?.tick === dataTick);
-  const needsCatalog = state.panel !== "images" || state.colors.top_k.enabled;
+  const needsCatalog = state.panel !== "images";
+  const topKEnabled = state.panel === "charts" && state.colors.top_k.enabled;
   const needsSeries = state.panel === "charts";
   const filteredMetricFields = useMemo(() => metricFields.filter((field) => field.metric.toLowerCase().includes(state.metric_filter.trim().toLowerCase())), [metricFields, state.metric_filter]);
   const visibleMetricNames = new Set(filteredMetricFields.map((field) => field.metric));
@@ -81,7 +86,7 @@ export default function App() {
   const { series, loadingMetrics, error: seriesError } = useScalarSeries(selectedRuns.map((run) => run.run_id), seriesRequests, state.smoothing, dataTick, ready && needsSeries);
   const chosenMetrics = useMemo(() => (state.metric_columns ?? defaultMetricColumns(metrics)).filter((name) => metrics.includes(name)), [state.metric_columns, metrics]);
   const summaryMetrics = state.panel === "table" ? [...chosenMetrics] : state.panel === "charts" ? metrics.filter((metric) => activeTarget(state.targets[metric])) : [];
-  if (state.colors.top_k.enabled && state.colors.top_k.metric && !summaryMetrics.includes(state.colors.top_k.metric)) summaryMetrics.push(state.colors.top_k.metric);
+  if (topKEnabled && state.colors.top_k.metric && !summaryMetrics.includes(state.colors.top_k.metric)) summaryMetrics.push(state.colors.top_k.metric);
   const summaryTargets = summaryMetrics.map((metric) => {
     const target = activeTarget(state.targets[metric]);
     return target ? [target.value, target.direction] : null;
@@ -189,9 +194,9 @@ export default function App() {
     return () => { cancelled = true; controller.abort(); };
   }, [ready, needsCatalog, summaryKey]);
 
-  const { colors, registry, localOnly: colorsLocalOnly, ready: palettesReady, savePalette, deletePalette } = useColors(runs, state.colors, resolvedTheme, workspace.workspaceId, workspace.writable, dataTick);
+  const colors = useColors(runs, state.colors, resolvedTheme, ready, update);
   const visibleSummaries = loadedSummary === summaryKey ? summaries : EMPTY_SUMMARIES;
-  const topIds = useMemo(() => loadedSummary === summaryKey ? topRunIds(selectedRuns, summaries, state.colors.top_k) : null, [selectedRuns, summaries, state.colors.top_k, loadedSummary, summaryKey]);
+  const topIds = useMemo(() => topKEnabled && loadedSummary === summaryKey ? topRunIds(selectedRuns, summaries, state.colors.top_k) : null, [selectedRuns, summaries, state.colors.top_k, topKEnabled, loadedSummary, summaryKey]);
   const configs = useMemo(() => new Map(selectedRuns.map((run) => [run.run_id, flattenConfig(run.config)])), [selectedRuns]);
   const params = useMemo(() => parameterColumns([...configs.values()]), [configs]);
 
@@ -239,14 +244,14 @@ export default function App() {
   } else if (selectedRuns.length === 0) {
     content = <div className="empty">Select a run to view its metrics.</div>;
   } else if (state.panel === "images") {
-    content = <MediaPanel key={state.media_type} workspaceId={workspace.workspaceId} runs={selectedRuns} state={state} colors={colors} refreshTick={pollTick + dataTick} onChange={update} />;
+    content = <MediaPanel key={`${workspace.contextVersion}:${state.media_type}`} workspaceId={workspace.workspaceId} runs={selectedRuns} state={state} colors={colors} refreshTick={pollTick + dataTick} onChange={update} />;
   } else if (state.panel === "table") {
     content = <CompareTable runs={selectedRuns} configs={configs} params={params} metrics={chosenMetrics} summaries={visibleSummaries} colors={colors} state={state}
-      loading={(!metrics.length && !catalogReady) || loadedSummary !== summaryKey} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onAppearance={setAppearance} onDetails={openDetails} onBaseline={setBaseline} topIds={topIds} onEditTags={setTagRuns} />;
+      loading={(!metrics.length && !catalogReady) || loadedSummary !== summaryKey} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onAppearance={setAppearance} onDetails={openDetails} onBaseline={setBaseline} onEditTags={setTagRuns} />;
   } else if (!metricFields.length && !catalogReady) {
     content = <div className="empty" role="status">Loading metrics…</div>;
   } else {
-    content = <ChartGrid metrics={filteredMetricFields} loadingMetrics={loadingMetrics} dataTick={dataTick} runs={selectedRuns} series={series} colors={colors} smoothing={state.smoothing} state={state} summaries={visibleSummaries} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onLocateRun={locateRun} topIds={topIds} />;
+    content = <ChartGrid key={workspace.contextVersion} metrics={filteredMetricFields} loadingMetrics={loadingMetrics} dataTick={dataTick} runs={selectedRuns} series={series} colors={colors} smoothing={state.smoothing} state={state} summaries={visibleSummaries} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onLocateRun={locateRun} topIds={topIds} />;
   }
 
   return <div className="app" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
@@ -256,22 +261,24 @@ export default function App() {
     <div className="workspace">
       <TopBar themeMode={themeMode} onThemeToggle={() => setThemeMode((mode) => nextThemeMode(mode))}
         onRefresh={() => { setDataTick((tick) => tick + 1); if (workspace.loadError) workspace.retry(); }}
-        state={state} views={workspace.views} writable={workspace.writable} ready={ready} localOnly={workspace.localOnly}
+        state={state} views={workspace.views} sharedViews={workspace.sharedViews} writable={workspace.writable} ready={ready} storageError={workspace.storageError} config={workspace.config} mode={workspace.mode} onMode={workspace.setMode} onImportConfig={workspace.importConfig} onRestoreRemote={workspace.restoreRemote}
         onChange={update} onOpenView={workspace.openView} onSaveView={workspace.saveView} onDeleteView={workspace.deleteView} onRenameView={workspace.renameView}
         metrics={metrics}
-        colorControls={<ColorMenu runs={runs} selectedIds={selectedIds} settings={state.colors} registry={registry} theme={resolvedTheme} localOnly={colorsLocalOnly} writable={workspace.writable} ready={palettesReady} onSavePalette={savePalette} onDeletePalette={deletePalette} onChange={(colors) => update({ colors })} />}
+        colorControls={<ColorMenu key={workspace.contextVersion} runs={runs} selectedIds={selectedIds} settings={state.colors} theme={resolvedTheme} palettes={workspace.palettes} ready={ready} onSavePalette={workspace.savePalette} onDeletePalette={workspace.deletePalette} onChange={(colors) => update({ colors })} />}
         compareControls={<CompareControls state={state} metrics={metrics} chosenMetrics={chosenMetrics} params={params} onChange={update} />} />
       <main className="content" id="workspace-panel" role="tabpanel" aria-labelledby={`${state.panel}-tab`} tabIndex={0}>
+        {workspace.storageError && <p className="workspace-notice" role="alert">{workspace.storageError}<button className="text-button" onClick={workspace.retryStorage}>Retry saving</button></p>}
+        {workspace.remoteError && <p className="workspace-notice" role="alert">{workspace.remoteError}<button className="text-button" onClick={() => void workspace.retryRemote()}>Retry remote saving</button></p>}
         {workspace.linkNotice && <p className="workspace-notice" role="status">{workspace.linkNotice}</p>}
         {state.selected_ids?.some((id) => !runs.some((run) => run.run_id === id)) && status === "ready" && !discovering && <p className="workspace-notice" role="status">Some runs in this selection are unavailable on this instance.</p>}
         {sources.some((source) => !source.online) && <p className="workspace-notice" role="status">Offline: {sources.filter((source) => !source.online).map((source) => source.label).join(", ")}. Selection and colors are retained.</p>}
         {(dataError || seriesError && needsSeries) && state.panel !== "images" && <p className="data-error" role="alert">Some metrics could not be updated. Available curves and previously loaded samples are retained.</p>}
         {baselineUndo && <p className="workspace-notice" role="status">Baseline cleared.<button className="text-button" onClick={() => setBaseline(baselineUndo)}>Undo</button><button className="text-button" onClick={() => setBaselineUndo(null)} aria-label="Dismiss baseline notice">×</button></p>}
-        <ColorLegend runs={selectedRuns} settings={state.colors} colors={colors} theme={resolvedTheme} />
+        <ColorLegend runs={selectedRuns} settings={state.colors} colors={colors} theme={resolvedTheme} showTopK={state.panel === "charts"} />
         {content}
       </main>
     </div>
-    {appearance && <RunAppearance key={appearance.run_id} run={appearance} runs={runs} selectedIds={selectedIds} settings={state.colors} registry={registry} colors={colors} theme={resolvedTheme} onChange={(colors) => update({ colors })} onClose={() => { setAppearance(null); setFocusedId(null); }} />}
+    {appearance && <RunAppearance key={appearance.run_id} run={appearance} runs={runs} selectedIds={selectedIds} settings={state.colors} colors={colors} theme={resolvedTheme} onChange={(colors) => update({ colors })} onClose={() => { setAppearance(null); setFocusedId(null); }} />}
     {detailsRun && <Suspense fallback={<div className="details-loading" role="status">Loading details…</div>}><RunDetailsDialog key={detailsRun.run.run_id} run={detailsRun.run} initialTab={detailsRun.tab} onEditTags={setTagRuns} onNoteSaved={() => setDataTick((tick) => tick + 1)} onClose={() => { setDetailsRun(null); setFocusedId(null); }} /></Suspense>}
     {tagRuns && <TagsDialog runs={tagRuns} onSaved={tagsSaved} onClose={() => setTagRuns(null)} />}
   </div>;

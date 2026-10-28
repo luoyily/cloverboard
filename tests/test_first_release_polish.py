@@ -116,13 +116,13 @@ def test_workspace_sqlite_rename_and_new_settings_are_independent(tmp_path):
     assert readonly.patch(f"/api/workspace/views/{view['view_id']}", json={"name": "no"}).status_code == 403
 
 
-@pytest.mark.parametrize("content", ["bad json", '{"version": 1, "seed": "x", "slots": {"a": -1}}', '{"version": 1, "seed": "x", "slots": {"a": 1, "b": 1}}'])
-def test_corrupt_color_rows_do_not_break_runs(tmp_path, content):
+@pytest.mark.parametrize("content", ["bad json", '{"palettes": [null]}'])
+def test_corrupt_palette_rows_do_not_break_runs(tmp_path, content):
     client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
-    client.put("/api/workspace/colors", json={"keys": ["run"]})
+    client.post("/api/workspace/palettes", json={"name": "Example", "colors": ["#abcdef", "#3276b8"]})
     with sqlite3.connect(tmp_path / ".workspace" / "workspace.sqlite") as connection:
-        connection.execute("UPDATE color_registry SET payload=?", (content,))
-    assert client.get("/api/workspace/colors").json()["slots"] == {}
+        connection.execute("UPDATE palette_library SET payload=?", (content,))
+    assert client.get("/api/workspace/palettes").status_code == 503
     assert client.get("/api/runs").status_code == 200
 
 

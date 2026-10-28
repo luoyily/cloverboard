@@ -1,6 +1,6 @@
 import type { RunSummary } from "./api";
 import type { ResolvedTheme } from "./theme";
-import { categoryKey, parameterValue, runColorKey, type ColorRegistry, type ColorSettings } from "./features";
+import { categoryKey, parameterValue, runColorKey, type ColorSettings } from "./features";
 import { BRIGHT_COLORS, DEFAULT_PALETTE, paletteBaseColors, paletteKey, type PaletteSelection } from "./palettes";
 export { BRIGHT_COLORS } from "./palettes";
 
@@ -47,6 +47,11 @@ export function visibleColor(color: string, theme: ResolvedTheme, palette: Palet
     if (contrast(next, BACKGROUNDS[theme]) >= minimumContrast) return next;
   }
   return hex(destination);
+}
+
+// A saved run color renders independently of the currently selected palette.
+export function displayColor(color: string, theme: ResolvedTheme): string {
+  return visibleColor(color, theme, { kind: "builtin", id: "bright" });
 }
 
 function lab(color: string): number[] {
@@ -100,7 +105,8 @@ function poolFor(selection: PaletteSelection) {
 }
 function labDistance(a: number[], b: number[]): number { return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); }
 
-export function slotColor(slot: number, seed: string, theme: ResolvedTheme, selection: PaletteSelection = DEFAULT_PALETTE): string {
+export function paletteColor(slot: number, selection: PaletteSelection = DEFAULT_PALETTE): string {
+  const seed = "cloverboard";
   const cacheKey = JSON.stringify([seed, paletteKey(selection)]);
   let palette = palettes.get(cacheKey);
   if (!palette) {
@@ -148,14 +154,7 @@ export function slotColor(slot: number, seed: string, theme: ResolvedTheme, sele
     palette.push(best);
   }
   const pair = palette[slot];
-  return authored && theme === "light" ? visibleColor(pair.lightSource ?? pair.light, theme, selection) : pair[theme];
-}
-
-export function extendRegistry(registry: ColorRegistry, keys: string[]): ColorRegistry {
-  const slots = { ...registry.slots };
-  let next = Math.max(-1, ...Object.values(slots)) + 1;
-  for (const key of [...new Set(keys)].sort()) if (!(key in slots)) slots[key] = next++;
-  return { ...registry, slots };
+  return (pair.lightSource ?? pair.light).toLowerCase();
 }
 
 const VIRIDIS = ["#440154", "#3b528b", "#21918c", "#5ec962", "#fde725"];
@@ -166,50 +165,73 @@ export function continuousColor(value: number, domain: [number, number], theme: 
   return visibleColor(hex(a.map((v, i) => v + (b[i] - v) * fraction)), theme);
 }
 
-export function resolveColors(runs: RunSummary[], registry: ColorRegistry, settings: ColorSettings, theme: ResolvedTheme): Map<string, string> {
-  const missing = theme === "light" ? "#747e8b" : "#a3adba";
-  const prefix = `parameter:[${JSON.stringify(settings.field)},`;
-  const families = new Map(Object.entries(registry.slots).filter(([key]) => key.startsWith(prefix)).sort((a, b) => a[1] - b[1]).map(([key], i) => [key, i]));
-  return new Map(runs.map((run) => {
-    const key = runColorKey(run), value = parameterValue(run, settings.field);
-    let color: string;
-    if (settings.mode === "continuous") {
-      color = typeof value === "number" && Number.isFinite(value) ? continuousColor(value, settings.domain, theme) : missing;
-    } else if (settings.mode === "parameter") {
-      const slot = families.get(categoryKey(settings.field, value));
-      if (value === undefined || slot === undefined) color = missing;
-      else {
-        const base = rgb(slotColor(slot, registry.seed, theme, settings.palette));
-        const blend = (hash(key) % 3) * .07, toward = theme === "light" ? 0 : 1;
-        color = visibleColor(hex(base.map((v) => v + (toward - v) * blend)), theme, settings.palette);
-      }
-    } else {
-      color = settings.overrides[key] ? visibleColor(settings.overrides[key], theme, settings.palette) : slotColor(settings.assignments[key] ?? registry.slots[key] ?? 0, registry.seed, theme, settings.palette);
-    }
-    return [run.run_id, color];
-  }));
+// Colors are materialized once in settings.runs. Rendering only adapts contrast;
+// it never combines automatic identities, reassignment slots or manual overrides.
+export function resolveColors(runs: RunSummary[], settings: ColorSettings, theme: ResolvedTheme): Map<string, string> {
+  return new Map(runs.map(run => [run.run_id, displayColor(settings.runs[runColorKey(run)]?.color ?? "#747e8b", theme)]));
 }
 
-export function reassignColors(runs: RunSummary[], selected: Set<string>, registry: ColorRegistry, settings: ColorSettings): ColorSettings {
-  const next = { ...settings, assignments: { ...settings.assignments } };
-  const movable = runs.filter((r) => selected.has(r.run_id) && !settings.overrides[runColorKey(r)]);
-  const fixed = runs.filter((r) => !movable.includes(r));
-  const light = resolveColors(fixed, registry, settings, "light"), dark = resolveColors(fixed, registry, settings, "dark");
-  const occupied: Pair[] = fixed.map((r) => ({ light: light.get(r.run_id)!, dark: dark.get(r.run_id)! }));
+function generatedColor(run: RunSummary, settings: ColorSettings): string {
+  const value = parameterValue(run, settings.field);
+  if (settings.mode === "continuous") return typeof value === "number" && Number.isFinite(value) ? continuousColor(value, settings.domain, "light") : "#747e8b";
+  if (value === undefined) return "#747e8b";
+  const slot = hash(categoryKey(settings.field, value)) % paletteBaseColors(settings.palette).length;
+  const base = rgb(paletteColor(slot, settings.palette)), blend = (hash(runColorKey(run)) % 3) * .07;
+  return hex(base.map(channel => channel * (1 - blend)));
+}
+
+// With no selection, fill only new runs. An explicit selection replaces colors
+// for those runs, while fixed and unselected entries remain untouched.
+export function assignColors(runs: RunSummary[], settings: ColorSettings, selected?: Set<string>): ColorSettings {
+  const movable = runs.filter(run => {
+    const entry = settings.runs[runColorKey(run)];
+    return !entry?.fixed && (selected ? selected.has(run.run_id) : !entry);
+  }).sort((a, b) => runColorKey(a).localeCompare(runColorKey(b)));
+  if (!movable.length) return settings;
+  const next = { ...settings, runs: { ...settings.runs } };
+  const moving = new Set(movable.map(runColorKey));
+  const occupied = runs.filter(run => !moving.has(runColorKey(run))).flatMap(run => {
+    const entry = settings.runs[runColorKey(run)];
+    return entry ? [entry.color] : [];
+  });
+  const colorLabs = (color: string) => ({ light: lab(displayColor(color, "light")), dark: lab(displayColor(color, "dark")) });
+  const distance = (a: ReturnType<typeof colorLabs>, b: ReturnType<typeof colorLabs>) => Math.min(labDistance(a.light, b.light), labDistance(a.dark, b.dark));
+  const occupiedLabs = occupied.map(colorLabs), used = new Set(occupied);
+  const candidates = settings.mode === "random" ? Array.from({ length: Math.max(32, runs.length * 2) }, (_, i) => {
+    const color = paletteColor(i, settings.palette), labs = colorLabs(color);
+    return { color, labs, score: occupiedLabs.length ? Math.min(...occupiedLabs.map(other => distance(labs, other))) : Infinity };
+  }) : [];
   for (const run of movable) {
-    const key = runColorKey(run), oldSlot = settings.assignments[key] ?? registry.slots[key];
-    let chosen = -1, score = -Infinity;
-    for (let slot = 0; slot < Math.max(32, runs.length * 2); slot++) {
-      if (slot === oldSlot) continue;
-      const candidate = { light: slotColor(slot, registry.seed, "light", settings.palette), dark: slotColor(slot, registry.seed, "dark", settings.palette) };
-      if (occupied.some((p) => p.light === candidate.light || p.dark === candidate.dark)) continue;
-      const distance = occupied.length ? Math.min(...occupied.map((p) => pairDistance(p, candidate))) : 1;
-      if (distance > score) { score = distance; chosen = slot; }
-    }
-    if (chosen >= 0) {
-      next.assignments[key] = chosen;
-      occupied.push({ light: slotColor(chosen, registry.seed, "light", settings.palette), dark: slotColor(chosen, registry.seed, "dark", settings.palette) });
-    }
+    const key = runColorKey(run);
+    let color: string;
+    if (settings.mode === "random") {
+      const old = settings.runs[key]?.color;
+      let best: typeof candidates[number] | undefined;
+      for (const candidate of candidates) {
+        if (candidate.color === old || used.has(candidate.color)) continue;
+        if (!best || candidate.score > best.score) best = candidate;
+      }
+      color = best?.color ?? old ?? paletteColor(used.size, settings.palette);
+      if (best) for (const candidate of candidates) candidate.score = Math.min(candidate.score, distance(candidate.labs, best.labs));
+    } else color = generatedColor(run, settings);
+    next.runs[key] = { color, fixed: false };
+    used.add(color);
   }
   return next;
+}
+
+export function recolorRuns(runs: RunSummary[], settings: ColorSettings): ColorSettings {
+  return assignColors(runs, settings, new Set(runs.map(run => run.run_id)));
+}
+
+export interface ColorUndo { before: ColorSettings["runs"]; after: ColorSettings["runs"] }
+export function undoColors(settings: ColorSettings, undo: ColorUndo): ColorSettings {
+  const runs = { ...settings.runs };
+  for (const [key, assigned] of Object.entries(undo.after)) {
+    const current = runs[key], previous = undo.before[key];
+    if (assigned === previous || current?.color !== assigned.color || current.fixed !== assigned.fixed) continue;
+    if (previous) runs[key] = previous;
+    else delete runs[key];
+  }
+  return { ...settings, runs };
 }

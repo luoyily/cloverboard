@@ -128,36 +128,25 @@ def test_shared_exploration_reads_require_auth_and_cannot_persist_colors(tmp_pat
     assert client.get("/api/scalars", params=query, headers=headers).status_code == 200
     assert client.get("/api/scalar-bounds", params=query, headers=headers).status_code == 200
     assert client.get("/api/scalar-summary", params={"run_id": "r1", "metric": "loss", "target": .2, "direction": "lte"}, headers=headers).json()["first_hit"]["step"] == 1243
-    assert client.get("/api/workspace/colors", headers=headers).status_code == 200
-    assert client.put("/api/workspace/colors", json={"keys": ["r1"]}, headers=headers).status_code == 403
+    assert client.get("/api/workspace/palettes", headers=headers).status_code == 200
+    assert client.put("/api/workspace/state", json={"state": {"colors": {"runs": {"r1": {"color": "#abcdef", "fixed": True}}}}, "saved_at": 1}, headers=headers).status_code == 403
     assert not (tmp_path / ".workspace").exists()
 
 
-def test_colors_append_only_restart_copy_and_readonly(tmp_path):
+def test_current_colors_restart_copy_and_readonly(tmp_path):
     client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
-    assert client.get("/api/workspace/colors").status_code == 200
-    assert not (tmp_path / ".workspace").exists()
-    first = client.put("/api/workspace/colors", json={"keys": ['run:["local","r2"]', 'run:["peer","r2"]']}).json()
-    next_colors = client.put("/api/workspace/colors", json={"keys": ['run:["local","older"]']}).json()
-    assert all(next_colors["slots"][key] == slot for key, slot in first["slots"].items())
-    assert len(set(next_colors["slots"].values())) == 3
+    runs = {'run:["local","r2"]': {"color": "#3276b8", "fixed": False}, 'run:["peer","r2"]': {"color": "#abcdef", "fixed": True}}
+    assert client.put("/api/workspace/state", json={"state": {"colors": {"runs": runs}}, "saved_at": 1}).status_code == 200
     path = tmp_path / ".workspace" / "workspace.sqlite"
     before = path.read_bytes()
     readonly = TestClient(create_app(logdir=tmp_path, read_only=True), base_url="http://127.0.0.1")
-    assert readonly.get("/api/workspace/colors").json() == next_colors
-    assert readonly.put("/api/workspace/colors", json={"keys": ["new"]}).status_code == 403
+    assert readonly.get("/api/workspace").json()["state"]["colors"]["runs"] == runs
+    assert readonly.put("/api/workspace/state", json={"state": {}, "saved_at": 2}).status_code == 403
     assert path.read_bytes() == before
     copied = tmp_path / "copied" / ".workspace"
     copied.mkdir(parents=True)
     (copied / "workspace.sqlite").write_bytes(before)
-    assert TestClient(create_app(logdir=copied.parent), base_url="http://127.0.0.1").get("/api/workspace/colors").json() == next_colors
-
-
-def test_empty_color_registry_is_available_without_writes(tmp_path):
-    client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
-    assert client.get("/api/workspace/colors").json()["slots"] == {}
-    assert client.get("/api/runs").status_code == 200
-    assert not (tmp_path / ".workspace").exists()
+    assert TestClient(create_app(logdir=copied.parent), base_url="http://127.0.0.1").get("/api/workspace").json()["state"]["colors"]["runs"] == runs
 
 
 def test_view_list_and_comparison_preferences_roundtrip(tmp_path):
@@ -165,9 +154,8 @@ def test_view_list_and_comparison_preferences_roundtrip(tmp_path):
     state = {
         "selected_ids": ["r1"], "baseline_id": "r1", "search": "SRx[24]", "search_regex": True, "run_sort": "name_desc",
         "targets": {"loss": _loss_targets()},
-        "chart_zoom": {"loss": {"x_min": 10, "x_max": 40, "y_min": 0, "y_max": 1}},
         "tooltip_time": "elapsed", "tooltip_delta": "both", "chart_warmup": {"loss": 10},
-        "colors": {"mode": "continuous", "field": "optimizer.lr", "domain": [0.0001, 0.1], "overrides": {"r1": "#3276b8"}},
+        "colors": {"mode": "continuous", "field": "optimizer.lr", "domain": [0.0001, 0.1], "runs": {"r1": {"color": "#3276b8", "fixed": True}}},
     }
     saved = client.post("/api/workspace/views", json={"name": "Low LR", "state": state})
     assert saved.status_code == 201
@@ -175,7 +163,7 @@ def test_view_list_and_comparison_preferences_roundtrip(tmp_path):
     for key in ("selected_ids", "search", "search_regex", "run_sort"):
         assert restored[key] == state[key]
     assert restored["colors"]["domain"] == [0.0001, 0.1]
-    assert restored["chart_zoom"] == state["chart_zoom"]
+    assert "chart_zoom" not in restored
     assert restored["chart_warmup"] == {"loss": 10}
     assert restored["tooltip_time"] == "elapsed"
     assert restored["tooltip_delta"] == "both"
@@ -191,8 +179,7 @@ def test_view_list_and_comparison_preferences_roundtrip(tmp_path):
 
 def test_curve_palette_survives_workspace_views_and_restart(tmp_path):
     client = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1")
-    registry = client.put("/api/workspace/colors", json={"keys": ['run:["local","r1"]']}).json()
-    colors = {"palette": {"kind": "builtin", "id": "bright"}, "assignments": {"r1": 17}, "overrides": {"r2": "#EA68A2"}}
+    colors = {"palette": {"kind": "builtin", "id": "bright"}, "runs": {"r1": {"color": "#3276b8", "fixed": False}, "r2": {"color": "#EA68A2", "fixed": True}}}
     state = {"colors": colors}
     assert client.put("/api/workspace/state", json={"state": state, "saved_at": 10}).status_code == 200
     assert client.post("/api/workspace/views", json={"name": "Bright curves", "state": state}).status_code == 201
@@ -201,7 +188,6 @@ def test_curve_palette_survives_workspace_views_and_restart(tmp_path):
     for saved in (snapshot["state"], snapshot["views"][0]["state"]):
         for key, value in colors.items():
             assert saved["colors"][key] == value
-    assert restored.get("/api/workspace/colors").json() == registry
 
 
 @pytest.mark.parametrize("mode", ["baseline", "target", "both", "hidden"])
@@ -258,7 +244,7 @@ def test_invalid_named_targets_are_rejected(tmp_path, invalid):
     {"run_sort": "wrong"},
     {"targets": {"loss": _loss_targets("nan")}},
     {"chart_zoom": {"loss": {"x_min": 30, "x_max": 10}}},
-    {"colors": {"domain": [1, 0]}}, {"colors": {"overrides": {"r1": "red"}}},
+    {"colors": {"domain": [1, 0]}}, {"colors": {"runs": {"r1": {"color": "red", "fixed": True}}}},
     {"colors": {"palette": "unknown"}},
     {"tooltip_time": "wrong"}, {"tooltip_delta": "wrong"}, {"chart_warmup": {"loss": 1 << 60}},
 ])

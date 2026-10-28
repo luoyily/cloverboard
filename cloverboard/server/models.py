@@ -123,23 +123,6 @@ class MetricTargets(BaseModel):
         return self
 
 
-class ChartZoom(BaseModel):
-    x_min: float = Field(allow_inf_nan=False)
-    x_max: float = Field(allow_inf_nan=False)
-    y_min: float | None = Field(default=None, allow_inf_nan=False)
-    y_max: float | None = Field(default=None, allow_inf_nan=False)
-
-    @model_validator(mode="after")
-    def ordered(self):
-        if self.x_min >= self.x_max:
-            raise ValueError("Zoom requires an increasing step range")
-        if (self.y_min is None) != (self.y_max is None):
-            raise ValueError("Both Y bounds are required")
-        if self.y_min is not None and self.y_min >= self.y_max:
-            raise ValueError("Zoom requires an increasing value range")
-        return self
-
-
 class RunRule(BaseModel):
     field: str = Field(min_length=1, max_length=500)
     operator: Literal["eq", "neq", "contains", "gt", "gte", "lt", "lte", "exists", "missing", "has_any", "has_all", "has_none", "empty", "not_empty"]
@@ -220,30 +203,29 @@ class CustomPaletteSelection(CustomPalette):
     kind: Literal["custom"] = "custom"
 
 
+class RunColor(BaseModel):
+    model_config = {"extra": "forbid"}
+    color: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+    fixed: bool = Field(strict=True)
+
+
 class ColorSettings(BaseModel):
+    model_config = {"extra": "forbid"}
     mode: Literal["random", "parameter", "continuous"] = "random"
     palette: Annotated[BuiltinPaletteSelection | CustomPaletteSelection, Field(discriminator="kind")] = Field(default_factory=BuiltinPaletteSelection)
     field: str = ""
     domain: tuple[float, float] = (0, 1)
-    overrides: dict[str, str] = Field(default_factory=dict)
-    assignments: dict[str, int] = Field(default_factory=dict)
+    runs: dict[str, RunColor] = Field(default_factory=dict, max_length=20000)
     top_k: TopKSettings = Field(default_factory=TopKSettings)
 
     @model_validator(mode="after")
     def valid_colors(self):
         if not all(math.isfinite(v) for v in self.domain) or self.domain[0] >= self.domain[1]:
             raise ValueError("Color domain must be finite and increasing")
-        if any(not re.fullmatch(r"#[0-9a-fA-F]{6}", v) for v in self.overrides.values()):
-            raise ValueError("Colors must use six-digit hex notation")
-        if any(v < 0 or v > 100000 for v in self.assignments.values()):
-            raise ValueError("Invalid color slot")
         return self
 
 
-class ColorRegistry(BaseModel):
-    version: Literal[1] = 1
-    seed: str
-    slots: dict[str, int] = Field(default_factory=dict)
+class PaletteLibrary(BaseModel):
     palettes: list[CustomPalette] = Field(default_factory=list, max_length=32)
 
     @model_validator(mode="after")
@@ -253,11 +235,8 @@ class ColorRegistry(BaseModel):
         return self
 
 
-class ColorAllocation(BaseModel):
-    keys: list[str] = Field(max_length=20000)
-
-
 class WorkspaceState(BaseModel):
+    model_config = {"extra": "forbid"}
     version: Literal[1] = 1
     selected_ids: list[str] | None = None
     search: str = Field(default="", max_length=1000)
@@ -304,7 +283,6 @@ class WorkspaceState(BaseModel):
     active_view_id: str | None = None
     baseline_id: str | None = None
     targets: dict[str, MetricTargets] = Field(default_factory=dict)
-    chart_zoom: dict[str, ChartZoom] = Field(default_factory=dict)
     colors: ColorSettings = Field(default_factory=ColorSettings)
 
     @model_validator(mode="after")
@@ -326,6 +304,21 @@ class SavedViewInput(BaseModel):
 
 class SavedView(SavedViewInput):
     view_id: str
+
+
+class WorkspaceConfig(PaletteLibrary):
+    version: Literal[1] = 1
+    state: WorkspaceState
+    views: list[SavedView] = Field(max_length=128)
+    saved_at: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def unique_views(self):
+        if len({view.view_id for view in self.views}) != len(self.views) or len({view.name.casefold() for view in self.views}) != len(self.views):
+            raise ValueError("View names and IDs must be unique")
+        if any(not re.fullmatch(r"[0-9a-f]{32}", view.view_id) for view in self.views):
+            raise ValueError("Invalid View ID")
+        return self
 
 
 class ViewRename(BaseModel):

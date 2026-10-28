@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from cloverboard.server.models import (
     SavedView, SavedViewInput, ViewRename, WorkspaceSave, WorkspaceSnapshot,
-    WorkspaceState, ColorRegistry, ColorAllocation, PaletteInput, CustomPalette,
+    WorkspaceState, PaletteLibrary, PaletteInput, CustomPalette, WorkspaceConfig,
 )
 from cloverboard.storage.paths import resolve_log_path
 
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS workspace_state (
 CREATE TABLE IF NOT EXISTS views (
     view_id TEXT PRIMARY KEY, name TEXT NOT NULL, state TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS color_registry (
+CREATE TABLE IF NOT EXISTS palette_library (
     id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL
 );
 """
@@ -38,7 +38,6 @@ class WorkspaceStore:
         self.workspace_id = hashlib.sha256(identity.encode()).hexdigest()[:24]
         self.writable = not read_only
         self._lock = RLock()
-        self._seed = uuid4().hex
         self._memory = sqlite3.connect(":memory:", check_same_thread=False) if self._root is None else None
         if self._memory is not None:
             self._memory.executescript(_SCHEMA)
@@ -86,34 +85,20 @@ class WorkspaceStore:
         if not self.writable:
             raise HTTPException(403, "Workspace is read-only")
 
-    def colors(self, keys: list[str] | None = None) -> ColorRegistry:
-        with self._connection(write=keys is not None) as connection:
-            colors = self._read_colors(connection)
-            if keys is not None:
-                slots = dict(colors.slots)
-                next_slot = max(slots.values(), default=-1) + 1
-                for key in sorted(set(keys)):
-                    if key not in slots:
-                        slots[key] = next_slot
-                        next_slot += 1
-                colors = colors.model_copy(update={"slots": slots})
-                connection.execute("INSERT OR REPLACE INTO color_registry VALUES (1, ?)", (colors.model_dump_json(),))
-            return colors
+    def palettes(self) -> list[CustomPalette]:
+        with self._connection() as connection:
+            return self._read_palettes(connection).palettes
 
-    def _read_colors(self, connection) -> ColorRegistry:
-        row = connection.execute("SELECT payload FROM color_registry WHERE id=1").fetchone() if connection else None
+    def _read_palettes(self, connection) -> PaletteLibrary:
+        row = connection.execute("SELECT payload FROM palette_library WHERE id=1").fetchone() if connection else None
         try:
-            colors = ColorRegistry.model_validate_json(row[0]) if row else ColorRegistry(seed=self._seed)
+            return PaletteLibrary.model_validate_json(row[0]) if row else PaletteLibrary()
         except ValidationError as error:
-            raise HTTPException(503, "Invalid workspace color registry") from error
-        slots = list(colors.slots.values())
-        if len(set(slots)) != len(slots) or any(slot < 0 or slot > 100000 for slot in slots):
-            raise HTTPException(503, "Invalid workspace color registry")
-        return colors
+            raise HTTPException(503, "Invalid workspace palette library") from error
 
     def save_palette(self, payload: PaletteInput, palette_id: str | None = None) -> CustomPalette:
         with self._connection(write=True) as connection:
-            colors = self._read_colors(connection)
+            colors = self._read_palettes(connection)
             existing = next((palette for palette in colors.palettes if palette.id == palette_id), None)
             if palette_id is not None and existing is None:
                 raise HTTPException(404, "Custom palette not found")
@@ -124,17 +109,17 @@ class WorkspaceStore:
             palette = CustomPalette(id=palette_id or f"custom:{uuid4().hex}", **payload.model_dump())
             palettes = [palette if item.id == palette_id else item for item in colors.palettes] if existing else [*colors.palettes, palette]
             colors = colors.model_copy(update={"palettes": palettes})
-            connection.execute("INSERT OR REPLACE INTO color_registry VALUES (1, ?)", (colors.model_dump_json(),))
+            connection.execute("INSERT OR REPLACE INTO palette_library VALUES (1, ?)", (colors.model_dump_json(),))
             return palette
 
     def delete_palette(self, palette_id: str) -> CustomPalette:
         with self._connection(write=True) as connection:
-            colors = self._read_colors(connection)
+            colors = self._read_palettes(connection)
             palette = next((item for item in colors.palettes if item.id == palette_id), None)
             if palette is None:
                 raise HTTPException(404, "Custom palette not found")
             colors = colors.model_copy(update={"palettes": [item for item in colors.palettes if item.id != palette_id]})
-            connection.execute("INSERT OR REPLACE INTO color_registry VALUES (1, ?)", (colors.model_dump_json(),))
+            connection.execute("INSERT OR REPLACE INTO palette_library VALUES (1, ?)", (colors.model_dump_json(),))
             return palette
 
     def snapshot(self) -> WorkspaceSnapshot:
@@ -170,6 +155,16 @@ class WorkspaceStore:
                 connection.execute("INSERT OR REPLACE INTO workspace_state VALUES (1, ?)", (payload.model_dump_json(),))
         return self.snapshot()
 
+    def import_config(self, payload: WorkspaceConfig):
+        # The merged libraries and current viewing settings are committed together.
+        with self._connection(write=True) as connection:
+            connection.execute("DELETE FROM views")
+            connection.executemany("INSERT INTO views VALUES (?, ?, ?)", [
+                (view.view_id, view.name, view.state.model_copy(update={"active_view_id": None}).model_dump_json()) for view in payload.views
+            ])
+            connection.execute("INSERT OR REPLACE INTO palette_library VALUES (1, ?)", (PaletteLibrary(palettes=payload.palettes).model_dump_json(),))
+            connection.execute("INSERT OR REPLACE INTO workspace_state VALUES (1, ?)", (WorkspaceSave(state=payload.state, saved_at=payload.saved_at).model_dump_json(),))
+
     @staticmethod
     def _check_name(connection, name: str, view_id: str | None):
         if any(row[0] != view_id and row[1].casefold() == name.casefold() for row in connection.execute("SELECT view_id, name FROM views")):
@@ -179,6 +174,8 @@ class WorkspaceStore:
         with self._connection(write=True) as connection:
             if view_id and not connection.execute("SELECT 1 FROM views WHERE view_id=?", (view_id,)).fetchone():
                 raise HTTPException(404, "View not found")
+            if view_id is None and connection.execute("SELECT COUNT(*) FROM views").fetchone()[0] >= 128:
+                raise HTTPException(409, "A workspace can contain at most 128 Views")
             name = payload.name.strip()
             self._check_name(connection, name, view_id)
             view = SavedView(view_id=view_id or uuid4().hex, name=name, state=payload.state.model_copy(update={"active_view_id": None}))
@@ -217,22 +214,10 @@ def read_workspace(store: WorkspaceStore = Depends(get_workspace)):
     return store.snapshot()
 
 
-@router.get("/colors", response_model=ColorRegistry)
-def read_colors(store: WorkspaceStore = Depends(get_workspace)):
-    """Read the stable identity-to-color-slot registry without allocating slots."""
-    return store.colors()
-
-
-@router.put("/colors", response_model=ColorRegistry)
-def allocate_colors(payload: ColorAllocation, store: WorkspaceStore = Depends(get_workspace)):
-    """Allocate missing keys without replacing existing slots; return the full registry."""
-    return store.colors(payload.keys)
-
-
 @router.get("/palettes", response_model=list[CustomPalette])
 def read_palettes(store: WorkspaceStore = Depends(get_workspace)):
     """Read the workspace's custom palette library; built-ins live in the frontend."""
-    return store.colors().palettes
+    return store.palettes()
 
 
 @router.post("/palettes", response_model=CustomPalette, status_code=201)
@@ -260,6 +245,13 @@ def save_workspace(payload: WorkspaceSave, store: WorkspaceStore = Depends(get_w
     Return the current full snapshot even when an older write is ignored.
     """
     return store.save_state(payload)
+
+
+@router.put("/config", response_model=WorkspaceSnapshot)
+def import_config(payload: WorkspaceConfig, store: WorkspaceStore = Depends(get_workspace)):
+    """Apply an imported configuration and merged libraries in one transaction."""
+    store.import_config(payload)
+    return store.snapshot()
 
 
 @router.post("/views", response_model=SavedView, status_code=201)
