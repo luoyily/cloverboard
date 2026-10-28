@@ -1,286 +1,178 @@
-# CloverBoard
+# 🍀 CloverBoard
 
-一个轻量、本地优先（local-first）的实验追踪工具。每个 Run 都有自己的目录
-和 `run.sqlite`；文本保存在 SQLite 中，图片、音频和代码 ZIP 是 Run 目录下的
-普通文件。通过右上角齿轮 **Settings** 统一选择 **Remote workspace**（远程）
-或 **Local · this browser**（本地）。普通访问默认远程；只读和 share 固定本地，
-首次从远程配置初始化。当前观看设置自动保存，View 和 Colors 的库及保存、更新、
-删除操作统一使用当前模式。命名 View 是手动保存的观看快照，打开时不会覆盖配置库。
+> **Early Alpha：** CloverBoard 当前处于早期预览阶段。
 
-观看配置包含实验勾选、筛选与排序、颜色及固定标记、Targets、Chart/Table/Media
-选项、hover 格式、图表布局和刷新间隔。缩放、光标位置、固定读数、播放进度和
-打开的弹窗属于临时交互；主题与侧栏宽度是独立的浏览器偏好。
-命名 View 保存完整观看配置。
+为实验对比而设计的日志记录工具：在一处查看多 Run 图表、Targets、Baseline、
+Tags 和 Notes。通过局域网聚合多台机器的实验，也能让 AI Agent 使用内置 MCP
+端点直接检查日志。
 
-通过 **Settings → Configuration** 将当前观看设置、命名 View 和调色板一起
-导出或导入为 JSON，包含每个实验的当前颜色和固定标记。导入会生成新 ID、
-处理重名并保留已有库，在当前模式打开导入设置；远程导入在一个事务内完成。
-文件不包含实验数据。本地模式的 **Restore remote settings** 重新应用远程观看设置，
-保留本地 View 和调色板库。切换模式只加载对应设置，不会跨位置复制。
-远程配置保存在 `.workspace/workspace.sqlite`。
-浏览器存储按服务地址和浏览器配置隔离，清理存储或更换浏览器前请导出备份。
+<p align="center">
+  <img src="readme_asset/screenshot_bright_charts.png" alt="浅色图表与光标差值读数" width="49%">
+  <img src="readme_asset/screenshot_dark_table.png" alt="深色表格与 Baseline 对比" width="49%">
+</p>
 
-> 本文是根目录 [README.md](README.md) 的中文版。命令、路径和 API 名称保持原样；
-> 如有歧义，以英文版为准。
+**Python 3.11+ · 本地优先 · MCP · [MIT](LICENSE)**
+
+[English](README.md)
 
 ## 快速开始
 
-需要 Python 3.11+。构建好的 wheel 已包含 WebUI，不需要 Node.js：
+### 1. 安装
+
+在本仓库根目录操作，需要 Python 3.11+ 和 Node.js 20.19+（20.x）或 22.12+：
 
 ```sh
-python -m pip install ./dist/cloverboard-0.1.0-py3-none-any.whl
-cloverboard serve --logdir ./runs
-```
-
-从当前仓库进行开发时，还需要 Node.js 20.19+ 或 22.12+：
-
-```sh
-python -m pip install -e ".[dev]"
+python -m pip install -e "."
 npm ci --prefix web
 npm run build --prefix web
-cloverboard serve --logdir ./runs
 ```
 
-UI 和只读 MCP Streamable HTTP 端点（`/mcp`）会一起启动。
-可复现数据集和三来源预览见 [scripts/README.md](scripts/README.md)。
+构建好的 wheel 包含 WebUI，安装后运行无需 Node.js。
 
-要聚合另一台实验机的日志，先在实验机运行
-`cloverboard serve --logdir ./runs --host 0.0.0.0 --share`，再将地址和打印的
-Token 直接传给本地服务：
+### 2. 用 Python 记录
 
-```sh
-cloverboard serve --peers "10.0.0.12:7230?token=TOKEN"
-```
-
-支持完整 HTTP(S) 地址和可选的来源名（`gpu1=10.0.0.12:7230?token=TOKEN`），
-多个 Peer 用逗号分隔。Token 会从地址中提取，通过 Bearer 认证头发送。
-分享服务重启后会生成新 Token，需要同步更新本地参数。
-
-安装 `dev` extra 后运行 `python -m build` 可以构建 wheel 和源码包。构建过程使用
-`npm ci`，并基于锁定依赖构建 WebUI。两种产物都输出到 `dist/`；从源码构建需要
-Node.js，安装 wheel 则不需要。本地日志、预览数据和导入的 TensorBoard 数据不会
-包含在构建产物中。
-
-## TensorBoard 标量导入
-
-在当前仓库安装可选集成，然后在两个终端分别运行导入器和服务：
-
-```sh
-python -m pip install -e ".[tensorboard]"
-cloverboard import-tensorboard ./tb_logs --output ./clover_runs --follow --interval 5
-cloverboard serve --logdir ./clover_runs
-```
-
-省略 `--follow` 表示只导入一次。源 event 文件只读；每个直接 Run 子目录都会保留
-自己的名字作为输出中的 Run 名。源根目录下的 event 文件使用根目录名。嵌套 Run
-和名称冲突会被拒绝。输出是标准 CloverBoard logdir，不会额外多出一层 `runs/`；
-源目录和输出目录不能重叠。只导入标量。
-
-轮询会检查文件大小、修改时间和文件身份，然后通过保留的游标读取追加记录。重复的
-metric/Step 记录按文件名顺序、再按文件内事件顺序决定最终值，重启后也是如此。
-Follow 模式会等待被截断的尾部；完整但非法的事件记录会让导入器报错停止。
-重启会重新读取当前所有源文件，并把标量 upsert 到已有 Run 数据库；不会重建或清空
-该数据库。相同的 metric/Step 值会更新，新点会插入，源中已不存在的点会保留。
-Run 名称、开始时间、config、环境、Tags、Notes、媒体/文本和 Web 工作区状态不会被
-修改。完整细节和边界见
-[导入指南](scripts/README.md#import-local-tensorboard-logs)。
-
-## 记录
+运行下面的示例，再将演示数值替换为训练循环中的实际指标：
 
 ```python
 import cloverboard as cb
+from PIL import Image
 
-cb.init(exp_name="unet-lr-test", config={"lr": 1e-5}, tags=["ablation", "dataset-v2"])
-cb.log({"loss": 0.12, "score": 0.91}, step=100, group="validation")
-cb.add_tags(["reviewed"])
-cb.remove_tags(["reviewed"])
-cb.log_image("validation/prediction", image, step=100)
-cb.log_audio("validation/generated", waveform, step=100, sample_rate=24000)
-cb.log_text("debug/output", "A plain text record.\nLine breaks are preserved.", step=100)
+cb.init(exp_name="baseline", logdir="./runs", config={"lr": 1e-3}, tags=["demo"])
+
+for step in range(100):
+    cb.log({"loss": 1 / (step + 1), "accuracy": step / 100}, step=step, group="train")
+
+cb.log_image("validation/preview", Image.new("RGB", (64, 64), "steelblue"), step=99)
+cb.log_text("validation/summary", "Baseline run completed.", step=99)
 ```
 
-要续写一个稳定的实验目录，传入它在 logdir 下的直接子目录名：
+换一个实验名或配置再次运行，即可对比不同 Run。日志保存在 `./runs`，
+每个 Run 各有一个目录和 SQLite 数据库；记录时无需启动服务。
 
-```python
-cb.init(logdir="./clover_runs", run_dir="experiment_a", config={"lr": 1e-5})
-```
-
-不存在的 Run 数据库会被初始化；已存在的会被重新打开用于追加。原始显示名称、开始
-时间和环境保持不变。显式 config 键会合并，提供的 Tags 会添加，重复的
-metric/Step 值会覆盖。不传 `run_dir` 时，每次 `init()` 都会分配一个新 Run。
-训练器负责恢复 checkpoint 并提供 Step。要接管一个已导入的实验，请先从 SDK
-写入同一 Run 前停止导入器。导入期间仍可编辑 Tags、Notes 和 Views。
-
-Tags 是区分大小写的单层字符串。每个 Run 最多 64 个 Tag，每个 Tag 长度为
-1–80 个字符。SDK 和 UI 都使用增量增删操作，因此并发更新不会影响无关标签。
-Tags 随 Run 数据库一起保存。
-
-`log_text(name, text, step)` 只接受纯字符串，最多 256 KiB UTF-8。相同的 name/Step
-会覆盖之前的正文和时间戳。空字符串、Unicode、空白和换行都会原样保留；
-HTML/Markdown 会按字面显示。Text 复用现有后台写入器，不创建媒体文件。
-
-`init(workspace_root=...)` 可选地把**该目录内部**的绝对路径，在 config、argv
-（包括 `--option=/path`）和快照元信息中记录为相对路径。根目录本身记为 `.`；
-目录外路径和已经是相对路径的字符串保持不变。基准在 init 时固定，即使之后 cwd
-发生变化。默认值 `None` 保持原有记录方式。这不会改变实际文件访问、用户传入的
-config 对象、文本正文、caption、Notes 或归档代码，并且不会把工作区绝对根路径
-写入元信息。
-
-```python
-cb.init(logdir="runs", workspace_root="/home/alice/project",
-        config={"data": "/home/alice/project/data"})  # 将 data 记录为 "data"
-```
-
-Audio 接受 `[-1, 1]` 范围内的 float NumPy 数组、int16 数组或 PCM16 WAV 路径。
-数组形状为 `[samples]` 或 `[samples, channels]`，并且必须提供整数采样率；支持
-单声道/立体声，每条记录解码后的 PCM 最大 32 MiB。WAV 路径使用文件头中的采样率；
-显式传入的采样率必须一致。不自动归一化、不重采样，也不依赖 FFmpeg。WAV 编码在
-有界后台队列中执行；队列过载时会跳过记录并发出警告。正常关闭会排空队列；强制
-杀死进程可能丢失待写记录。
-
-## 浏览
-
-- **Chart settings → Top K** 仅强调 Charts 中的曲线，不影响 Table 和 Media，
-  设置随观看配置和 View 保存。
-- **Targets** 支持每个指标保存多个命名目标，每次激活一个。可选的图表短名显示在
-  左侧 Y 轴；Charts 和 Table 共用激活目标，`Δ Target` 文案保持固定。
-- 通过 Run 的 `⋯` → **Edit tags**，或在 Details → Overview 中编辑。批量增删使用
-  **Edit tags for selection**。Peer 和分享模式下的 Tags 只读；附加的本地来源目录
-  仍可编辑。
-- 搜索旁的 tag 过滤器只隐藏列表行，不改变选择。Dynamic View Rules 支持精确的 tag
-  成员条件（any/all/none）以及 tagged/untagged。
-- **Colors** 的 **Random** 和 **By parameter · families** 模式中，**Palette** 可选择
-  内置 Default、Bright 或工作区调色板。
-  Bright 的 12 个基础色写死在代码中。**New palette** 复制当前配色，可修改名称、
-  编辑和排序 2–24 个不重复的 HEX 颜色，也可批量粘贴颜色列表，并查看明暗背景预览。
-  自定义配色先按指定顺序分配，更多 Run 或参数分组自动生成扩展色。**By parameter**
-  为参数值生成调色板主色，组内实验使用轻微深浅变化；**Continuous** 继续使用 Viridis。
-  每个实验只保存一份 `{color, fixed}`，手动改色默认固定，取消固定保留当前颜色，
-  下次重新分配时才改变。切换调色板、配色模式和重新分配都保留固定颜色；
-  新实验只补充缺失颜色，不改变已有实验。
-  Bright 和自定义配色在白底使用 2:1 对比度，暗底使用 3:1。
-  每个工作区最多保存 32 份自定义调色板，存储于 `<logdir>/.workspace/workspace.sqlite`。
-  View 和共享状态链接携带配色快照，之后编辑或删除库中的调色板不会改变已保存的颜色。
-  只读和共享模式允许在本地编辑和保存调色板。
-  调色板 API 为 `GET/POST /api/workspace/palettes` 和
-  `PUT/DELETE /api/workspace/palettes/{id}`，新增和更新的请求体为
-  `{ "name": "My palette", "colors": ["#7ECEF4", "#EA68A2"] }`。
-  `colors.palette` 改为 `{ "kind": "builtin", "id": "bright" }` 或包含
-  `kind: "custom"`、`id`、`name`、`colors` 的自定义快照，API 不再接受旧字符串格式。
-- Table → **Table settings** 控制指标小数位（0–8，默认 4）和可选的 Tags 列。
-  已记录的指标和差值使用该格式；已登记参数保持原有表示。较小的非零值和大值使用
-  科学计数法。排序和计算使用原始值。
-- **Media** 包含 Images、Audio 和 Text。三者都使用显式 Step、Follow latest 和
-  采样时间线；Images/Audio 还支持分页。固定 Step 使用请求 Step 当天或之前最近的
-  一条记录。Audio 按需加载，并支持通过本地和已认证 Peer 文件路由进行 seek。
-  自动刷新会保留当前播放。
-- Text 每个 run/name/Step 显示一个字符串，带简短初始预览、全文展开和复制。
-  名称/Step 选择按每种媒体类型独立保存。`/api/text-names`、`/api/text-timeline`
-  和 `/api/text` 提供目录、采样 Step 和所选字符串；缺失文本返回 null。
-- 观看偏好、过滤和格式化保存在工作区状态、命名 View 和共享状态链接中。
-
-## 通过 HTTP 使用 MCP
-
-将支持 Streamable HTTP 的 MCP 客户端指向：
-
-```text
-http://127.0.0.1:7230/mcp
-```
-
-不需要第二个进程，也不需要 MCP 专用启动命令。使用 `--share` 时，在
-`Authorization: Bearer …` 头中填入与 Web 服务相同的访问 token。不要把凭据放进
-MCP URL。分享和只读模式允许 MCP 查询 POST，但仍继续拒绝 REST 写入。该端点只
-暴露只读工具；不能执行 Python/SQL、启动训练或修改实验。
-
-| 工具 | 用途 |
-| --- | --- |
-| `list_runs` | 按名称/ID/来源/config/tag 过滤；默认返回最近 10 个 Run，每页最多 50 个；支持按时间/名称排序。 |
-| `get_runs` | 最多 20 个 Run；默认返回元信息和 config 键。config 字段、Notes、环境、快照摘要和完整 Tags 需要显式选择。 |
-| `list_metrics` | 合并后的指标路径和记录该指标的 Run ID；支持子串过滤和分页；不返回点或统计。 |
-| `compare_configs` | 默认返回 config 差异；支持转义点号字段过滤、分页和逐 Run 错误。 |
-| `compare_metrics` | 原始最新值，或共同 Step 当天/之前的值；可选 baseline/targets 和历史统计；行分页。 |
-| `get_series` | 默认 200 个原始采样；支持 Step 范围、数量和采样元信息；时间戳可选。 |
-| `plot_metric` | 一个指标最多 8 个 Run，返回内联 PNG 和精简元信息；可选尾部/Step 范围和 EMA。 |
-| `list_image_names` | 单个 Run 的纯文本图像类别；计数和首末 Step；支持过滤和分页，默认 20 个。 |
-| `list_images` | 最新或指定 Step 当天/之前的纯文本 ID/尺寸；默认 6 个，可选有界 caption。 |
-| `get_images` | 以 1–4 个指定 image ID 读取内联 PNG；分辨率有界，可选按原图像素裁剪。 |
-
-`list_runs.query` 接受带类型的参数和 tag 过滤。例如：
-
-```json
-{"rules": [{"field": "tags", "operator": "has_all", "value": ["ablation"]}]}
-```
-
-`get_runs.config_fields` 选择转义点号的叶子路径或前缀，例如
-`["optimizer.lr", "model"]`；这些字段会以扁平 map 返回。`include=["config"]`
-请求嵌套 config，Notes 使用 `notes_offset`/`notes_limit`。被省略的大字段会列出
-名称，便于针对性重试。Snapshot 返回数量/状态/大小。
-
-`compare_metrics` 返回实际采样 Step；只有提供 baseline 或 targets 时才出现差值。
-历史统计通过 `include_stats=["extrema", "first_hit"]` 显式启用：extrema 包含原始
-Step，两项统计都覆盖完整原始历史，与所选 Step 无关。失败按行返回。
-`compare_configs.values` 与 `run_ids` 对齐；`missing_indices` 区分字段缺失和 null，
-`omitted_indices` 标识超出输出预算的值。
-
-JSON 输出使用类型化模型和 24,000 字符的紧凑 JSON 上限。大型参数/环境值共享
-12,000 字符预算。按需使用过滤、更小的页或更少的样本。`get_series` 为满足上限不会
-删除内部 gap marker：过多 gap 会产生带 `truncated` 和 `next_step` 的前缀以便继续。
-配置的来源仍保持一跳。工具不继承 Web 的选择/设置；Notes 和 Tags 是数据，不是指令。
-
-`plot_metric` 返回原生 MCP 图片内容（`image/png`，1000 × 480），
-`structuredContent` 中带精简元信息和一个文本块；不返回点/刻度数组。例如：
-
-```json
-{"run_ids": ["run_20261025_001", "run_20261025_002"], "metric": "metrics/BSDS100/psnr", "range_mode": "last_20"}
-```
-
-使用 `list_runs` 返回的真实 ID。`range_mode` 为 `full`（默认）、`last_50` 或
-`last_20`，按请求 Run 记录 Step 范围的并集计算。也可以传入包含端点的
-`step_min`/`step_max`；预设和显式边界不能同时使用。默认使用原始值；`smoothing`
-（0–0.999）在裁剪和采样前复用 Web 的完整历史 EMA。`max_points` 默认每条曲线
-800，最高 2000，允许少量额外极值。过多 gap 会产生逐 Run 错误，而不是静默省略
-曲线的一部分。
-
-绘图使用线性坐标、白底和绘图区外右侧带序号的图例。完整显示标签（最多 200
-字符）、实际图例文本、颜色、数量和逐 Run 错误随图片返回。空曲线标记为
-`[no data]`。相同比较集合的颜色稳定，并复用 Web 基础色板，不依赖工作区颜色
-槽位。图片使用已有 Pillow 在内存中渲染，不写文件。字体在本地探测；服务器没有
-合适字体时，可设置 `CLOVERBOARD_PLOT_FONT` 指向可读的 TTF/TTC，中文标签尤其
-需要。不下载字体。JSON 上限只作用于元信息，不作用于图片字节。
-
-训练图片使用 `list_image_names` → `list_images` → `get_images`。
-发现过程从不打开图片文件。`list_image_names` 接收单个 `run_id`、可选的不区分
-大小写的 `name` 子串和 `limit`/`offset`（默认 20，最多 50）。`list_images`
-需要 `run_id` 和 `name`；返回实际 Step、该 Step 的总数、`next_offset` 和图片
-ID/尺寸。省略 `step` 表示最新，或请求不晚于它的最大已记录 Step。实时 Run 翻页时
-应固定返回的 Step。每页默认 6 张，最多 24 张。`include=["caption"]` 最多增加
-200 个 caption 字符和截断标记。Offset 是页位置，不是跨 Run 的样本身份。
-
-`get_images` 需要显式 ID；只有该工具读取训练图片像素：
-
-```json
-{"items": [{"run_id": "run_20261025_001", "image_id": "<image_id from list_images>", "crop": [120, 80, 256, 256]}], "max_side": 512}
-```
-
-可选 crop 是 EXIF 方向归一化后原图像素坐标的 `[x, y, width, height]`。必须完全
-位于图片内，并在缩小前应用。`max_side` 默认 512（128–1024）；保持宽高比，小图
-不会放大。最多四个 item 可引用不同 Run 或同一图片的不同裁剪。输出是原生 PNG
-ImageContent 加精简元信息：item 保持请求顺序，成功项的 `image_index` 从 1 开始
-编号返回图片。包含原始/返回尺寸和请求的裁剪。逐项错误会保留其他图片；全部失败时
-不返回像素且 `isError=true`。结果中不重复路径、URL 和 caption。
-
-Web 和 MCP 共享 64 MiB 本地预览缓存，按文件版本、大小和裁剪区域区分。Peer 读取
-会获取所选原图以保持裁剪精度，沿用正常来源鉴权、单文件 64 MiB 传输上限和现有
-1600 万像素图片限制。解码/编码有两个共享工作槽位。所有内容都留在内存中；不引入
-新的图片依赖、HTTP 端点、拼图或自动样本匹配。
-
-HTTP 协议测试覆盖初始化、工具发现/调用、校验、鉴权和只读行为；无需注册真实
-Agent。
-
-## 检查
+### 3. 打开看板
 
 ```sh
+cloverboard serve --logdir ./runs
+```
+
+访问 [http://127.0.0.1:7230](http://127.0.0.1:7230)。WebUI 与 MCP 端点
+在同一个进程中启动。
+
+## 四片叶子，一块看板
+
+记录、对比、聚合、问答。
+
+| 叶子 | 能做什么 | 适用场景 |
+| --- | --- | --- |
+| **Record · 记录** | 用 Python 记录标量、配置、超参数、图片、音频、文本和代码快照。 | 在现有训练循环中加入日志记录。 |
+| **Compare · 对比** | 使用图表、表格、Targets、Baseline、Tags、Notes 和 View 对比实验。 | 比较学习率、数据增强、数据集或随机种子。 |
+| **Aggregate · 聚合** | 在同一看板汇集本地目录和局域网 Peer。 | 实验分散在笔记本、工作站和多台 GPU 机器上。 |
+| **Ask · 问答** | 通过 MCP 查询 Run、指标、配置、曲线和已记录的训练图片。 | 让 Agent 直接检查实验，无需先导出日志。 |
+
+## 为对比而设计，具体体现在哪里
+
+- **颜色稳定，便于辨认。** 刷新和新增 Run 时，已有实验保留各自颜色。
+  支持重新分配所选实验的颜色、按超参数分族着色和自定义调色板。
+  固定某个 Run 的颜色后，重新分配、切换调色板或配色模式都不会改变它。
+- **Targets、Baseline 和光标处的差值。** 为整块看板选择一个 Baseline Run，
+  再为各指标设置命名 Target。沿图表 Step 移动即可查看 `Δ Base` / `Δ Target`，
+  Table 使用相同的对比参照。**Chart settings → Top K** 仅在 Charts 中强调领先曲线。
+- **View 恢复完整的对比方式。** 实验勾选、筛选、排序、Baseline、Targets、
+  配色和 Chart/Table/Media 设置都可以保存为命名 View。
+  缩放、光标位置、固定读数和播放进度属于临时交互；主题与侧栏宽度是浏览器偏好。
+
+当前观看配置会自动保存到 **Settings** 中选择的位置：**Remote workspace**（远程）
+或 **Local · this browser**（本地）。普通访问默认远程，只读与 share 访问保存到本地；
+View 和调色板统一使用当前保存位置。总设置也提供当前配置、View 和调色板的 JSON
+导入导出，本地模式还可通过 **Restore remote settings** 恢复远程观看配置。
+
+## 聚合与分享
+
+在 GPU 机器上，以 Token 保护的只读模式启动服务：
+
+```sh
+cloverboard serve --logdir ./runs --host 0.0.0.0 --share
+```
+
+在自己的机器上，填入 GPU 机器的局域网地址和服务打印的 Token：
+
+```sh
+cloverboard serve --logdir ./runs --peers "gpu1=10.0.0.12:7230?token=TOKEN"
+```
+
+多个 Peer 用逗号分隔；附加本地目录使用 `--source "archive=./older-runs"`。
+Peer 聚合为一级，Peer 数据只读。分享服务重启后会生成新的 Token。
+
+也可以在浏览器中通过 GPU 机器的局域网地址和 `?token=TOKEN` 打开分享看板。
+查看者可以在本地编辑、保存自己的观看配置，不会改动远程工作区或实验数据。
+
+## 已经在用 TensorBoard？可以继续用
+
+CloverBoard 可以使用自己的 Python SDK，也可以在不修改训练代码的情况下，
+从现有 TensorBoard event 文件导入标量。TensorBoard 可与它同时运行；导入器
+将数据写入 CloverBoard 日志目录，保留原始 event 文件不变。
+
+在本仓库安装可选集成：
+
+```sh
+python -m pip install -e ".[tensorboard]"
+```
+
+终端 1：导入已有标量，并持续跟进新事件：
+
+```sh
+cloverboard import-tensorboard ./tb_logs --output ./tb_runs --follow --interval 5
+```
+
+终端 2：打开导入后的实验：
+
+```sh
+cloverboard serve --logdir ./tb_runs
+```
+
+仅导入标量。去掉 `--follow` 可执行单次导入；源目录与输出目录需要分开。
+
+## MCP
+
+将支持 Streamable HTTP 的 MCP 客户端连接到 `http://127.0.0.1:7230/mcp`。
+端点与 WebUI 共用服务和数据来源，无需启动第二个进程。
+
+| 数据 | 工具 |
+| --- | --- |
+| Run 与详情 | `list_runs`、`get_runs` |
+| 指标与序列 | `list_metrics`、`get_series`、`compare_metrics` |
+| 配置对比 | `compare_configs` |
+| 曲线图 | `plot_metric` |
+| 已记录的训练图片 | `list_image_names`、`list_images`、`get_images` |
+
+连接分享服务时，在其地址后使用 `/mcp`，并在客户端请求头中传入
+`Authorization: Bearer TOKEN`。
+
+所有 MCP 工具均为只读，不能执行代码、启动训练或修改实验。
+它们独立查询实验数据，不会继承浏览器当前的实验勾选、View 和显示设置。
+
+## 适用场景
+
+适合单机消融、小团队跨多台 GPU 机器对比实验，以及 Agent 辅助复盘。
+训练编排和托管式云端协作不属于当前范围。
+
+## 开发与测试
+
+完成快速开始中的环境准备后，安装开发依赖，按需执行检查：
+
+```sh
+python -m pip install -e ".[dev]"
 python -m pytest -q
 npm test --prefix web
 npm run build --prefix web
 ```
+
+构建包含 WebUI 的 wheel：
+
+```sh
+python -m build
+```
+
+## 许可证
+
+基于 [MIT 许可证](LICENSE) 授权。

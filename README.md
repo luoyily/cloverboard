@@ -1,329 +1,195 @@
-# CloverBoard
+# 🍀 CloverBoard
 
-A lightweight, local-first experiment tracker. Each run has its own directory
-and `run.sqlite`; text is stored in SQLite, while images, audio and code ZIPs are files under that run.
-**Settings** (gear) selects **Remote workspace** or **Local · this browser**.
-Normal access defaults to Remote; read-only/share access always uses Local,
-initially copied from the remote workspace. Current viewing settings save
-automatically in the chosen location. Views and Colors use that same location
-for their libraries and save/update/delete actions. Named Views are manual
-snapshots; opening one does not replace either library.
+> **Early Alpha:** CloverBoard is currently in early preview.
 
-Viewing settings include run selection, filters and sorting, colors and fixed
-flags, Targets, Chart/Table/Media options, hover formatting, chart layout and
-refresh interval. Zoom, pointer position, pinned readouts, playback position
-and open dialogs are temporary. Theme and sidebar width are separate browser
-preferences. Named Views capture the complete viewing settings.
+Experiment tracking built for comparison: multi-run charts, targets, baselines,
+tags and notes in one place. Bring experiments together across your LAN and
+let AI agents inspect them through a built-in MCP endpoint.
 
-**Settings → Configuration** exports/imports one JSON file containing current
-viewing settings, named Views and palettes, including each run's color and fixed
-flag. Imports add copies with new IDs, rename duplicate names and open the
-imported settings in the current mode. Remote imports commit all changes together.
-Experiment data is not included. In Local mode, **Restore remote settings**
-copies the latest remote viewing settings while keeping local Views and palettes.
-Switching modes reloads that location's settings without copying across modes.
-Remote settings live in `.workspace/workspace.sqlite`. Browser storage is
-local to the server address and browser profile; export a backup before clearing
-it or moving to another browser.
+<p align="center">
+  <img src="readme_asset/screenshot_bright_charts.png" alt="Light theme charts with hover deltas" width="49%">
+  <img src="readme_asset/screenshot_dark_table.png" alt="Dark theme table with baseline comparisons" width="49%">
+</p>
 
-## Start
+**Python 3.11+ · Local-first · MCP · [MIT](LICENSE)**
 
-Requires Python 3.11+. A built wheel includes the WebUI and needs no Node.js:
+[简体中文](README.zh-CN.md)
+
+## Quick start
+
+### 1. Install
+
+From this repository, use Python 3.11+ and Node.js 20.19+ (20.x) or 22.12+:
 
 ```sh
-python -m pip install ./dist/cloverboard-0.1.0-py3-none-any.whl
-cloverboard serve --logdir ./runs
-```
-
-For development from this checkout, also install Node.js 20.19+ or 22.12+:
-
-```sh
-python -m pip install -e ".[dev]"
+python -m pip install -e "."
 npm ci --prefix web
 npm run build --prefix web
-cloverboard serve --logdir ./runs
 ```
 
-The UI and read-only MCP Streamable HTTP endpoint (`/mcp`) start together.
-For a reproducible dataset and three-source preview, see [scripts/README.md](scripts/README.md).
+Built wheels include the WebUI and do not require Node.js to run.
 
-To read experiments from another machine, start its server with
-`cloverboard serve --logdir ./runs --host 0.0.0.0 --share`, then pass its address
-and printed token directly to the local server:
+### 2. Log from Python
 
-```sh
-cloverboard serve --peers "10.0.0.12:7230?token=TOKEN"
-```
-
-HTTP(S) URLs and optional source names (`gpu1=10.0.0.12:7230?token=TOKEN`)
-are supported; separate multiple peers with commas. Tokens are extracted from
-the URLs and sent as Bearer headers. Restarting the shared server generates a
-new token, which must be updated on the local server.
-
-To build a wheel and source archive, run `python -m build` after installing the
-`dev` extra. The build uses `npm ci` and builds the WebUI from the locked
-dependencies. Both outputs go into `dist/`; building from source requires
-Node.js, while installing the wheel does not. Local logs, previews and imported
-TensorBoard data are excluded.
-
-## TensorBoard scalar import
-
-Install the optional integration in this checkout, then run the importer and
-server in separate terminals:
-
-```sh
-python -m pip install -e ".[tensorboard]"
-cloverboard import-tensorboard ./tb_logs --output ./clover_runs --follow --interval 5
-cloverboard serve --logdir ./clover_runs
-```
-
-Omit `--follow` for a single import. Source event files are read only; each
-immediate Run subdirectory keeps its name in the output. Event files directly
-in the source root use the root's directory name. Nested Runs and name collisions
-are rejected. Output is a standard CloverBoard logdir, with no extra `runs/`
-level; source and output must not overlap. Only scalars are imported.
-
-Polling checks size, modification time and file identity, then reads appended
-records using retained cursors. Duplicate metric/Step records use filename
-order, then event order, including after restart. Follow mode waits for truncated
-tails; a complete but invalid event record stops the importer with an error.
-Restarting re-reads all current source files and upserts scalars into the
-existing Run database; it does not recreate or clear that database. Matching
-metric/Step values are updated, new points are inserted, and points no longer
-present in the source are retained. Run name, start time, config, environment,
-Tags, Notes, media/text and Web workspace state are not modified. Full details
-and boundaries are in
-[the import guide](scripts/README.md#import-local-tensorboard-logs).
-
-## Recording
+Run this example, then replace the demo values with metrics from your training
+loop:
 
 ```python
 import cloverboard as cb
+from PIL import Image
 
-cb.init(exp_name="unet-lr-test", config={"lr": 1e-5}, tags=["ablation", "dataset-v2"])
-cb.log({"loss": 0.12, "score": 0.91}, step=100, group="validation")
-cb.add_tags(["reviewed"])
-cb.remove_tags(["reviewed"])
-cb.log_image("validation/prediction", image, step=100)
-cb.log_audio("validation/generated", waveform, step=100, sample_rate=24000)
-cb.log_text("debug/output", "A plain text record.\nLine breaks are preserved.", step=100)
+cb.init(exp_name="baseline", logdir="./runs", config={"lr": 1e-3}, tags=["demo"])
+
+for step in range(100):
+    cb.log({"loss": 1 / (step + 1), "accuracy": step / 100}, step=step, group="train")
+
+cb.log_image("validation/preview", Image.new("RGB", (64, 64), "steelblue"), step=99)
+cb.log_text("validation/summary", "Baseline run completed.", step=99)
 ```
 
-To continue a stable experiment directory, pass its immediate subdirectory name:
+Run it again with another experiment name or configuration to compare runs.
+Logs stay on disk under `./runs`, with a separate directory and SQLite database
+for each run. Logging does not require the server to be running.
 
-```python
-cb.init(logdir="./clover_runs", run_dir="experiment_a", config={"lr": 1e-5})
-```
-
-An absent Run database is initialized; an existing one is reopened for appends.
-The original display name, start time and environment remain. Explicit config
-keys merge, supplied Tags are added, and repeated metric/Step values overwrite.
-Without `run_dir`, each `init()` allocates a new Run. The trainer restores its
-checkpoint and supplies Steps. To take over an imported experiment, stop the
-importer before writing to the same Run from the SDK. Tags, Notes and Views can
-still be edited while importing.
-
-Tags are case-sensitive, single-level strings. A run supports 64 tags, each
-1–80 characters. SDK and UI use incremental add/remove operations so unrelated
-labels survive concurrent updates. Tags travel with the run database.
-
-`log_text(name, text, step)` accepts only a plain string, up to 256 KiB UTF-8.
-The same name/Step overwrites its previous body and timestamp. Empty strings,
-Unicode, whitespace and newlines are preserved; HTML/Markdown are displayed
-literally. Text uses the existing background writer and creates no media file.
-
-`init(workspace_root=...)` optionally records absolute paths **inside that
-directory** relative to it in config, argv (including `--option=/path`) and
-snapshot metadata. The root itself becomes `.`; outside paths and already
-relative strings stay unchanged. The base is fixed at init, even if cwd later
-changes. With the default `None`, recording is unchanged. This does not alter
-file access, user config objects, text bodies, captions, Notes or archived code,
-and the absolute workspace root is not added to recorded metadata.
-
-```python
-cb.init(logdir="runs", workspace_root="/home/alice/project",
-        config={"data": "/home/alice/project/data"})  # records data as "data"
-```
-
-Audio accepts float NumPy arrays in `[-1, 1]`, int16 arrays, or PCM16 WAV paths.
-Arrays use `[samples]` or `[samples, channels]` and require an integer sample rate;
-mono/stereo and up to 32 MiB decoded PCM per record are supported. WAV paths use
-their header's sample rate; an explicit rate must agree. No automatic
-normalization, resampling or FFmpeg dependency. WAV encoding runs on a bounded
-background queue; overload skips records with a warning. Normal shutdown flushes
-the queue; forcibly killing a process can lose pending records.
-
-## Browsing
-
-- **Chart settings → Top K** emphasizes curves in Charts only; Table and Media
-  are unaffected. Its settings are included in viewing configuration and Views.
-- **Targets** stores multiple named references per metric with one active target.
-  An optional chart label appears beside the left Y axis; Charts and Table share
-  the active threshold, and the `Δ Target` label stays fixed.
-- Run `⋯` → **Edit tags**, or edit from Details → Overview. Use **Edit tags for
-  selection** for bulk add/remove. Peer and share tags are read-only; attached
-  local source directories remain editable.
-- The tag filter beside search only hides list rows. Selection stays unchanged.
-  Dynamic View Rules support exact tag membership (any/all/none) and tagged/untagged.
-- **Colors** → **Palette** in **Random** or **By parameter · families** selects the
-  built-in Default/Bright palettes or a workspace palette. Bright's 12 colors are
-  defined in code. **New palette**
-  copies the selected palette; edit its name and 2–24 unique HEX colors, reorder
-  colors, or paste a color list. Light/dark previews show the displayed colors.
-  Custom palettes use their authored order, then generate extra shades for more runs
-  or parameter families. In **By parameter**, each value gets a palette color and
-  runs in that family use subtle shades. Switching palettes regenerates colors
-  for unfixed runs. **Continuous** keeps Viridis. Each run has one saved
-  `{color, fixed}` entry; changing a color fixes it by default. Unfixing keeps its
-  current color until reassignment. Fixed colors survive palette and mode changes.
-  New runs receive colors without changing existing runs.
-  Bright/custom palettes
-  retain more brightness on white (2:1 contrast); dark backgrounds use 3:1.
-  Up to 32 custom palettes are saved in `<logdir>/.workspace/workspace.sqlite`.
-  Views and shared state links carry a palette snapshot, so later library edits or
-  deletion do not change saved colors. Read-only/share mode can edit and save
-  palettes locally.
-  Library API: `GET/POST /api/workspace/palettes` and
-  `PUT/DELETE /api/workspace/palettes/{id}`. Create/update bodies are
-  `{ "name": "My palette", "colors": ["#7ECEF4", "#EA68A2"] }`.
-  `colors.palette` now uses `{ "kind": "builtin", "id": "bright" }` or a custom
-  snapshot `{ "kind": "custom", "id": "custom:…", "name": "…", "colors": […] }`;
-  the previous string format is no longer accepted by the API.
-- Table → **Table settings** controls metric decimal places (0–8, default 4)
-  and the optional Tags column. Recorded metrics and deltas use this formatting;
-  registered parameters keep their existing representation. Small nonzero values
-  and large values use scientific notation. Sorting and calculations use raw values.
-- **Media** contains Images, Audio and Text. All use explicit Steps, Follow latest
-  and sampled timelines; Images/Audio also support paging. Fixed Steps use the nearest record at or before
-  the requested Step. Audio loads on demand and supports seeking through local
-  and authenticated Peer file routes. Auto refresh preserves active playback.
-- Text shows one string per run/name/Step, with a short initial preview, full
-  text expansion and copying. Name/Step choices are saved independently for
-  each media type. `/api/text-names`, `/api/text-timeline` and `/api/text` expose
-  discovery, sampled Steps and the selected string; missing text returns null.
-- Viewing preferences, filters and formatting are saved in workspace state,
-  named Views and shared state links.
-
-## MCP over HTTP
-
-Point an MCP client supporting Streamable HTTP at:
-
-```text
-http://127.0.0.1:7230/mcp
-```
-
-No second process or MCP-specific launch command is required. For `--share`,
-use the same access token as the Web service in an `Authorization: Bearer …`
-header. Keep credentials out of the MCP URL. Share and read-only modes allow MCP
-query POSTs while continuing to reject REST writes. The endpoint exposes only
-read tools; it cannot execute Python/SQL, start training or change experiments.
-
-| Tool | Purpose |
-| --- | --- |
-| `list_runs` | Name/ID/source/config/tag filtering; 10 newest runs by default, up to 50 per page; time/name sorting. |
-| `get_runs` | Up to 20 runs; metadata/config keys by default. Config fields, Notes, environment, snapshot summary and full Tags are opt-in. |
-| `list_metrics` | Merged metric paths and recording Run IDs, substring filtering and pagination; no points/statistics. |
-| `compare_configs` | Config differences by default, escaped dotted field filtering, pagination and per-run errors. |
-| `compare_metrics` | Raw latest or at/before a common Step; optional baseline/targets and historical statistics; paginated rows. |
-| `get_series` | 200 raw samples by default, Step range, count and sampling metadata; timestamps opt-in. |
-| `plot_metric` | One metric across up to 8 runs, inline PNG and compact metadata; optional tail/Step range and EMA. |
-| `list_image_names` | Text-only image categories for one run; counts and first/last Steps; filter and page, 20 by default. |
-| `list_images` | Text-only IDs/sizes at latest or at/before a Step; 6 by default, optional bounded captions. |
-| `get_images` | Read 1–4 selected image IDs as inline PNGs; bounded resolution and optional original-pixel crop. |
-
-`list_runs.query` accepts typed parameter and tag filters. For example:
-
-```json
-{"rules": [{"field": "tags", "operator": "has_all", "value": ["ablation"]}]}
-```
-
-`get_runs.config_fields` selects escaped dotted leaf paths or prefixes, e.g.
-`["optimizer.lr", "model"]`; these return a flat map. `include=["config"]`
-requests nested config, while Notes have `notes_offset`/`notes_limit`. Omitted
-large fields are named for focused retries. Snapshots return counts/status/size.
-
-`compare_metrics` returns actual sample Steps; deltas appear only when baseline
-or targets are supplied. Historical statistics are opt-in through
-`include_stats=["extrema", "first_hit"]`: extrema include their original Steps,
-and both statistics cover full raw history independently of the selected Step.
-Failures are per row. `compare_configs.values` align with `run_ids`;
-`missing_indices` distinguish absent fields from null, and `omitted_indices`
-identify values beyond the output budget.
-
-JSON outputs use typed models and a 24,000-character compact JSON ceiling. Large
-parameter/environment values share a 12,000-character budget. Use filters, smaller
-pages or fewer samples when needed. `get_series` never removes internal gap
-markers to enforce its cap: excessive gaps produce a prefix with `truncated`
-and `next_step` for continuation. Configured sources remain one-hop. Tools do
-not inherit Web selections/settings; Notes and Tags are data, not instructions.
-
-`plot_metric` returns native MCP image content (`image/png`, 1000 × 480), with
-compact metadata in `structuredContent` and a text block; it does not return
-point/tick arrays. For example:
-
-```json
-{"run_ids": ["run_20261025_001", "run_20261025_002"], "metric": "metrics/BSDS100/psnr", "range_mode": "last_20"}
-```
-
-Use actual IDs from `list_runs`. `range_mode` is `full` (default), `last_50` or
-`last_20`, measured on the union of the requested runs' recorded Step spans.
-Alternatively pass inclusive `step_min`/`step_max`; presets and explicit bounds
-cannot be combined. Raw values are the default; `smoothing` (0–0.999) reuses the
-Web's EMA over full history before cropping and sampling. `max_points` defaults
-to 800 per curve, up to 2000, with a few extra extrema allowed. Excessive gaps
-produce a per-run error instead of silently omitting part of a curve.
-
-The plot uses linear axes, a white background and an indexed legend outside the
-drawing area. Full display labels (up to 200 characters), shown legend text,
-colors, counts and per-run errors accompany the image. Empty curves are marked
-`[no data]`. Colors are stable for the same comparison set and reuse the Web's
-base palette, independently of workspace color slots. Images are rendered in
-memory with the existing Pillow dependency; no files are written by the tool.
-Fonts are detected locally; set `CLOVERBOARD_PLOT_FONT` to a readable TTF/TTC
-path when the server has no suitable font, especially for CJK labels. No fonts
-are downloaded. The JSON ceiling applies to metadata, not image bytes.
-
-For training images, use `list_image_names` → `list_images` → `get_images`.
-Discovery never opens image files. `list_image_names` takes a single `run_id`,
-optional case-insensitive `name` substring and `limit`/`offset` (20 by default,
-up to 50). `list_images` requires `run_id` and `name`; it returns the actual
-Step, total at that Step, `next_offset` and image IDs/dimensions. Omit `step` for
-latest, or request the greatest recorded Step at/before it. Pin the returned
-Step for subsequent pages of a live run. Pages default to 6 images, up to 24.
-`include=["caption"]` adds at most 200 caption characters and a truncation flag.
-Offset is a page position, not a cross-run sample identity.
-
-`get_images` requires explicit IDs; only this tool reads training image pixels:
-
-```json
-{"items": [{"run_id": "run_20261025_001", "image_id": "<image_id from list_images>", "crop": [120, 80, 256, 256]}], "max_side": 512}
-```
-
-The optional crop is `[x, y, width, height]` in original pixels **after EXIF
-orientation**. It must fit completely inside the image and is applied before
-shrinking. `max_side` defaults to 512 (128–1024); aspect ratio is preserved and
-small images are never enlarged. Up to four items can reference different runs
-or different crops of the same image. Output is native PNG ImageContent plus
-compact metadata: items remain in request order, and successful `image_index`
-values number the returned images from 1. Original/returned dimensions and
-requested crop are included. Per-item errors preserve other images; a wholly
-failed request returns no pixels and `isError=true`. Paths, URLs and captions
-are not repeated in this result.
-
-Web and MCP share a 64 MiB local preview cache, keyed by file version, size and
-crop. Peer reads fetch selected originals to preserve crop accuracy, with
-normal source authentication, a 64 MiB per-file transfer cap and the existing
-16-million-pixel image limit. Decoding/encoding has two shared worker slots.
-Everything stays in memory; no new image dependency, HTTP endpoint, collage or
-automatic sample matching is introduced.
-
-HTTP protocol tests exercise initialization, tool discovery/calls, validation,
-authentication and read-only behavior; they require no real Agent registration.
-
-## Checks
+### 3. Open the board
 
 ```sh
+cloverboard serve --logdir ./runs
+```
+
+Open [http://127.0.0.1:7230](http://127.0.0.1:7230). The WebUI and MCP endpoint
+start in the same process.
+
+## Four leaves, one board
+
+Record, compare, aggregate, ask.
+
+| Leaf | What it does | Use it when |
+| --- | --- | --- |
+| **Record** | Log scalars, configs, hyperparameters, images, audio, text and code snapshots from Python. | You want logging inside an existing training loop. |
+| **Compare** | Compare runs with charts, tables, targets, a baseline, tags, notes and saved Views. | You are choosing between learning rates, augmentations, datasets or seeds. |
+| **Aggregate** | Combine local directories and LAN peers in one board. | Experiments live across a laptop, workstation and GPU machines. |
+| **Ask** | Give an MCP client access to runs, metrics, configs, plots and logged images. | You want an agent to inspect experiments without exporting logs first. |
+
+## What “built for comparison” means
+
+- **Colors you can keep track of.** Runs retain their colors across refreshes
+  and as new runs arrive. Reassign selected colors, color by hyperparameter
+  family, or use a custom palette. Fix a run's color to preserve it through
+  reassignment, palette changes and color-mode changes.
+- **Targets, a baseline and deltas at the cursor.** Choose one baseline run
+  for the board and set named targets for each metric. Inspect
+  `Δ Base` / `Δ Target` while moving through chart steps, and compare the same
+  references in Table. **Chart settings → Top K** emphasizes leading curves
+  in Charts only.
+- **Views that restore how you compare.** Save run selection, filters,
+  sorting, the baseline, targets, colors and Chart/Table/Media settings as a
+  named View. Zoom, pointer position, pinned readouts and playback position
+  remain temporary; theme and sidebar width are browser preferences.
+
+Current viewing configuration saves automatically to the location selected in
+**Settings**: **Remote workspace** or **Local · this browser**. Normal access
+defaults to Remote; read-only and share access save locally. Views and palettes
+use the same location. Settings also provides JSON import/export for current
+configuration, Views and palettes, plus **Restore remote settings** in Local
+mode.
+
+## Aggregate and share
+
+On a GPU machine, serve its log directory in token-protected, read-only mode:
+
+```sh
+cloverboard serve --logdir ./runs --host 0.0.0.0 --share
+```
+
+On your own machine, use that machine's LAN address and the token printed by
+the server:
+
+```sh
+cloverboard serve --logdir ./runs --peers "gpu1=10.0.0.12:7230?token=TOKEN"
+```
+
+Separate multiple peers with commas. Add another local directory with
+`--source "archive=./older-runs"`. Peer aggregation is one hop, and peer data
+is read-only. Restarting a shared server generates a new token.
+
+You can also open the shared board in a browser using the GPU machine's LAN
+address and `?token=TOKEN`. Viewers can edit and save their own local viewing
+configuration without changing the remote workspace or experiment data.
+
+## Already using TensorBoard? Keep it.
+
+CloverBoard works with its own Python SDK or imports scalars from existing
+TensorBoard event files without changing your training code. TensorBoard can
+keep running alongside it; the importer writes a CloverBoard log directory
+and leaves the source event files unchanged.
+
+Install the optional integration from this repository:
+
+```sh
+python -m pip install -e ".[tensorboard]"
+```
+
+Terminal 1 — import existing scalars and follow new events:
+
+```sh
+cloverboard import-tensorboard ./tb_logs --output ./tb_runs --follow --interval 5
+```
+
+Terminal 2 — open the imported runs:
+
+```sh
+cloverboard serve --logdir ./tb_runs
+```
+
+Only scalars are imported. Omit `--follow` for a one-time import, and keep the
+source and output directories separate.
+
+## MCP
+
+Connect an MCP client that supports Streamable HTTP to
+`http://127.0.0.1:7230/mcp`. It uses the same server and data sources as the
+WebUI; no second process is needed.
+
+| Data | Tools |
+| --- | --- |
+| Runs and details | `list_runs`, `get_runs` |
+| Metrics and series | `list_metrics`, `get_series`, `compare_metrics` |
+| Config comparison | `compare_configs` |
+| Curve plots | `plot_metric` |
+| Logged images | `list_image_names`, `list_images`, `get_images` |
+
+For a shared server, use its address with `/mcp` and pass
+`Authorization: Bearer TOKEN` in your client's headers.
+
+All MCP tools are read-only: they cannot execute code, start training or modify
+experiments. They query experiment data independently of the browser's current
+selection, Views and display settings.
+
+## When it fits
+
+Use CloverBoard for single-machine ablations, small teams with experiments
+across several GPU machines, and agent-assisted experiment reviews. Training
+orchestration and hosted team collaboration are outside its scope.
+
+## Development and tests
+
+After the Quick start setup, install the development dependencies and run the
+checks you need:
+
+```sh
+python -m pip install -e ".[dev]"
 python -m pytest -q
 npm test --prefix web
 npm run build --prefix web
 ```
+
+To build a wheel with the WebUI bundled:
+
+```sh
+python -m build
+```
+
+## License
+
+Licensed under the [MIT License](LICENSE).
