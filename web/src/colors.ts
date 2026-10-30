@@ -1,160 +1,153 @@
 import type { RunSummary } from "./api";
 import type { ResolvedTheme } from "./theme";
 import { categoryKey, parameterValue, runColorKey, type ColorSettings } from "./features";
-import { BRIGHT_COLORS, DEFAULT_PALETTE, paletteBaseColors, paletteKey, type PaletteSelection } from "./palettes";
-export { BRIGHT_COLORS } from "./palettes";
+import { paletteBaseColors, paletteKey, type PaletteSelection } from "./palettes";
+import { ensureContrast, hex, hexToHsv, hslToHex, lab, labDistance, rgb } from "./colorMath";
 
-type Pair = { light: string; dark: string; lightSource?: string };
-const BACKGROUNDS = { light: "#ffffff", dark: "#222831" };
-const INITIAL: Pair[] = [
-  { light: "#3276b8", dark: "#72b2ef" }, { light: "#c05a24", dark: "#f4a266" },
-  { light: "#267f6c", dark: "#65c5ac" }, { light: "#9955af", dark: "#c993df" },
-  { light: "#b74666", dark: "#ed8ca9" }, { light: "#847113", dark: "#c5b657" },
-  { light: "#4d5eaf", dark: "#97a4ee" }, { light: "#a54938", dark: "#e79783" },
-  { light: "#347f98", dark: "#6fc2dc" }, { light: "#697c30", dark: "#b1c877" },
-  { light: "#875c46", dark: "#cfa58a" }, { light: "#7b658b", dark: "#bca2ce" },
-];
+const BACKGROUNDS: Record<ResolvedTheme, string> = { light: "#ffffff", dark: "#222831" };
+const CONTRAST: Record<ResolvedTheme, number> = { light: 2, dark: 3 };
+const MISSING = "#747e8b";
+export const SIMILAR_COLOR_DISTANCE = .065;
 
 export function hash(value: string): number {
   let n = 2166136261;
   for (const c of value) { n ^= c.charCodeAt(0); n = Math.imul(n, 16777619); }
   return n >>> 0;
 }
-function rgb(hex: string): number[] { return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255); }
-function linear(v: number): number { return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }
-function hex(values: number[]): string { return `#${values.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("")}`; }
-export type Hsv = { h: number; s: number; v: number };
-export function hexToHsv(color: string): Hsv {
-  const [r, g, b] = rgb(color), high = Math.max(r, g, b), low = Math.min(r, g, b), delta = high - low;
-  let h = 0;
-  if (delta) h = high === r ? (g - b) / delta : high === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
-  return { h: (h * 60 + 360) % 360, s: high ? delta / high : 0, v: high };
-}
-export function hsvToHex({ h, s, v }: Hsv): string {
-  const hue = ((h % 360) + 360) % 360 / 60;
-  const chroma = v * s, x = chroma * (1 - Math.abs(hue % 2 - 1)), m = v - chroma;
-  const channels = [[chroma, x, 0], [x, chroma, 0], [0, chroma, x], [0, x, chroma], [x, 0, chroma], [chroma, 0, x]][Math.floor(hue)];
-  return hex(channels.map((channel) => channel + m));
-}
-function luminance(color: string): number { const [r, g, b] = rgb(color).map(linear); return r * 0.2126 + g * 0.7152 + b * 0.0722; }
-export function contrast(a: string, b: string): number { const x = luminance(a), y = luminance(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
 
-export function visibleColor(color: string, theme: ResolvedTheme, palette: PaletteSelection = DEFAULT_PALETTE): string {
-  const source = rgb(color), destination = theme === "light" ? [0, 0, 0] : [1, 1, 1];
-  const minimumContrast = theme === "light" && (palette.kind === "custom" || palette.id === "bright") ? 2 : 3;
-  for (let i = 0; i <= 100; i++) {
-    const next = hex(source.map((v, j) => v + (destination[j] - v) * i / 100));
-    if (contrast(next, BACKGROUNDS[theme]) >= minimumContrast) return next;
+const themed = new Map<string, string>();
+// One source color per run; light/dark are derived from it with a single rule.
+export function themeColor(color: string, theme: ResolvedTheme): string {
+  const key = `${theme}:${color.toLowerCase()}`;
+  let value = themed.get(key);
+  if (value === undefined) {
+    value = ensureContrast(key.slice(key.indexOf(":") + 1), BACKGROUNDS[theme], CONTRAST[theme]);
+    if (themed.size >= 4096) themed.delete(themed.keys().next().value!);
+    themed.set(key, value);
   }
-  return hex(destination);
+  return value;
 }
 
-// A saved run color renders independently of the currently selected palette.
-export function displayColor(color: string, theme: ResolvedTheme): string {
-  return visibleColor(color, theme, { kind: "builtin", id: "bright" });
-}
-
-function lab(color: string): number[] {
-  const [r, g, b] = rgb(color).map(linear);
-  const l = Math.cbrt(.4122214708 * r + .5363325363 * g + .0514459929 * b);
-  const m = Math.cbrt(.2119034982 * r + .6806995451 * g + .1073969566 * b);
-  const s = Math.cbrt(.0883024619 * r + .2817188376 * g + .6299787005 * b);
-  return [.2104542553 * l + .793617785 * m - .0040720468 * s, 1.9779984951 * l - 2.428592205 * m + .4505937099 * s, .0259040371 * l + .7827717662 * m - .808675766 * s];
-}
-export function colorDistance(a: string, b: string): number { const x = lab(a), y = lab(b); return Math.hypot(...x.map((v, i) => v - y[i])); }
-function hsl(h: number, s: number, l: number): string {
-  const a = s * Math.min(l, 1 - l);
-  const channel = (n: number) => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
-  return hex([channel(0), channel(8), channel(4)]);
-}
-function pairDistance(a: Pair, b: Pair): number { return Math.min(colorDistance(a.light, b.light), colorDistance(a.dark, b.dark)); }
-const palettes = new Map<string, Pair[]>();
-const candidateScores = new Map<string, { distances: number[]; seen: number }>();
-const candidates: Pair[] = [];
-for (let h = 0; h < 360; h += 7) for (const s of [.48, .68, .86]) for (const l of [.34, .44, .54]) {
-  candidates.push({ light: visibleColor(hsl(h, s, l), "light"), dark: visibleColor(hsl(h, s, Math.min(.8, l + .25)), "dark") });
-}
-// Select slots using the original 3:1 pairs to keep dark identities stable.
-// Retain the source so Bright can render a lighter version on white backgrounds.
-function brightPair(lightSource: string, darkSource = lightSource): Pair {
-  return { light: visibleColor(lightSource, "light"), dark: visibleColor(darkSource, "dark"), lightSource };
-}
-function authoredCandidates(colors: readonly string[]): Pair[] {
-  const result: Pair[] = [];
-  for (const color of colors) for (const offset of [-8, 0, 8]) for (const s of [.45, .6, .75]) for (const l of [.45, .55, .65]) {
-    const hue = (hexToHsv(color).h + offset + 360) % 360;
-    result.push(brightPair(hsl(hue, s, l), hsl(hue, s, l + .2)));
+interface LabPair { light: number[]; dark: number[] }
+const sourceLabCache = new Map<string, LabPair>();
+function sourceLabs(color: string): LabPair {
+  const key = color.toLowerCase();
+  let labs = sourceLabCache.get(key);
+  if (!labs) {
+    labs = { light: lab(themeColor(key, "light")), dark: lab(themeColor(key, "dark")) };
+    if (sourceLabCache.size >= 4096) sourceLabCache.delete(sourceLabCache.keys().next().value!);
+    sourceLabCache.set(key, labs);
   }
-  return result;
+  return labs;
 }
-function makePool(initial: Pair[], generated: Pair[]) {
-  return { initial, generated, labs: generated.map((p) => ({ light: lab(p.light), dark: lab(p.dark) })) };
+function labSeparation(a: LabPair, b: LabPair): number {
+  return Math.min(labDistance(a.light, b.light), labDistance(a.dark, b.dark));
 }
-const builtinPools = { default: makePool(INITIAL, candidates), bright: makePool(BRIGHT_COLORS.map((color) => brightPair(color)), authoredCandidates(BRIGHT_COLORS)) };
-const customPools = new Map<string, ReturnType<typeof makePool>>();
-function poolFor(selection: PaletteSelection) {
-  if (selection.kind === "builtin") return builtinPools[selection.id];
+// Distance between what the user actually sees in both themes.
+export function colorSeparation(a: string, b: string): number {
+  return labSeparation(sourceLabs(a), sourceLabs(b));
+}
+
+interface PoolEntry { color: string; labs: LabPair }
+interface PalettePool { bases: PoolEntry[]; generated: PoolEntry[] }
+const pools = new Map<string, PalettePool>();
+const poolEntry = (color: string): PoolEntry => { const normalized = color.toLowerCase(); return { color: normalized, labs: sourceLabs(normalized) }; };
+
+// Every palette follows one pipeline: its authored base colors first, then shades
+// derived from those hues. No separate hand-authored light/dark identities.
+function poolFor(selection: PaletteSelection): PalettePool {
   const key = paletteKey(selection);
-  let pool = customPools.get(key);
+  let pool = pools.get(key);
   if (!pool) {
-    pool = makePool(paletteBaseColors(selection).map((color) => brightPair(color)), authoredCandidates(selection.colors));
-    if (customPools.size >= 64) customPools.delete(customPools.keys().next().value!);
-    customPools.set(key, pool);
+    const baseColors = paletteBaseColors(selection);
+    const bases = baseColors.map(poolEntry);
+    const known = new Set(bases.map((base) => base.color));
+    const generated: PoolEntry[] = [];
+    for (const base of baseColors) {
+      const hue = hexToHsv(base).h;
+      for (const offset of [-8, 0, 8]) for (const s of [.45, .6, .75]) for (const l of [.45, .55, .65]) {
+        const color = hslToHex((hue + offset + 360) % 360, s, l).toLowerCase();
+        if (known.has(color)) continue;
+        known.add(color);
+        generated.push(poolEntry(color));
+      }
+    }
+    pool = { bases, generated };
+    if (pools.size >= 64) pools.delete(pools.keys().next().value!);
+    pools.set(key, pool);
   }
   return pool;
 }
-function labDistance(a: number[], b: number[]): number { return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); }
 
-export function paletteColor(slot: number, selection: PaletteSelection = DEFAULT_PALETTE): string {
-  const seed = "cloverboard";
-  const cacheKey = JSON.stringify([seed, paletteKey(selection)]);
-  let palette = palettes.get(cacheKey);
-  if (!palette) {
-    if (palettes.size >= 128) { const oldest = palettes.keys().next().value!; palettes.delete(oldest); candidateScores.delete(oldest); }
-    palette = []; palettes.set(cacheKey, palette);
+interface PaletteSequence {
+  pool: PalettePool;
+  sequence: PoolEntry[];
+  baseDistance: number[];
+  generatedDistance: number[];
+  seen: number;
+}
+const sequences = new Map<string, PaletteSequence>();
+
+function sequenceFor(selection: PaletteSelection): PaletteSequence {
+  const key = paletteKey(selection);
+  let state = sequences.get(key);
+  if (!state) {
+    const pool = poolFor(selection);
+    state = {
+      pool,
+      sequence: [],
+      baseDistance: pool.bases.map(() => Infinity),
+      generatedDistance: pool.generated.map(() => Infinity),
+      seen: 0,
+    };
+    if (sequences.size >= 64) sequences.delete(sequences.keys().next().value!);
+    sequences.set(key, state);
   }
-  const { initial, generated, labs } = poolFor(selection);
-  const authored = selection.kind === "custom" || selection.id === "bright";
-  while (palette.length <= slot) {
-    // Keep authored palettes in order; preserve the legacy Default ordering.
-    if (authored && palette.length < initial.length) {
-      palette.push(initial[palette.length]);
-      continue;
+  return state;
+}
+
+function foldPicked(state: PaletteSequence) {
+  for (const picked of state.sequence.slice(state.seen)) {
+    for (let i = 0; i < state.pool.bases.length; i++) {
+      state.baseDistance[i] = Math.min(state.baseDistance[i], labSeparation(state.pool.bases[i].labs, picked.labs));
     }
-    const pool = palette.length < initial.length ? initial : generated;
-    const usedLight = new Set(palette.map((p) => p.light)), usedDark = new Set(palette.map((p) => p.dark));
-    let distances: number[] | undefined;
-    if (pool === generated) {
-      let scores = candidateScores.get(cacheKey);
-      if (!scores) { scores = { distances: generated.map(() => Infinity), seen: 0 }; candidateScores.set(cacheKey, scores); }
-      for (const previous of palette.slice(scores.seen)) {
-        const light = lab(previous.light), dark = lab(previous.dark);
-        for (let i = 0; i < generated.length; i++) scores.distances[i] = Math.min(scores.distances[i], labDistance(labs[i].light, light), labDistance(labs[i].dark, dark));
-      }
-      scores.seen = palette.length;
-      distances = scores.distances;
+    for (let i = 0; i < state.pool.generated.length; i++) {
+      state.generatedDistance[i] = Math.min(state.generatedDistance[i], labSeparation(state.pool.generated[i].labs, picked.labs));
     }
-    let best: Pair | undefined, score = -Infinity;
-    for (let i = 0; i < pool.length; i++) {
-      const candidate = pool[i];
-      if (usedLight.has(candidate.light) || usedDark.has(candidate.dark)) continue;
-      const separation = distances?.[i] ?? (palette.length ? Math.min(...palette.map((p) => pairDistance(p, candidate))) : 0);
-      const nextScore = separation + hash(seed + candidate.light) / 2 ** 32 * .000001;
-      if (nextScore > score) { score = nextScore; best = candidate; }
-    }
-    // Beyond the vetted candidates, expand instead of cycling through occupied slots.
-    if (!best) {
-      let n = palette.length;
-      do {
-        const lightSource = hsl((n * 137.507764 + hash(seed)) % 360, .6 + (n % 5) * .03, .3 + (n % 17) * .01);
-        best = { light: visibleColor(lightSource, "light"), dark: visibleColor(hsl((n * 137.507764 + hash(seed)) % 360, .6, .55 + (n % 19) * .01), "dark"), lightSource };
-        n++;
-      } while (usedLight.has(best.light) || usedDark.has(best.dark));
-    }
-    palette.push(best);
   }
-  const pair = palette[slot];
-  return (pair.lightSource ?? pair.light).toLowerCase();
+  state.seen = state.sequence.length;
+}
+
+function fallbackEntry(state: PaletteSequence): PoolEntry {
+  const used = new Set(state.sequence.map((entry) => entry.color));
+  for (let attempt = 0; attempt < 4096; attempt++) {
+    const n = state.sequence.length + attempt;
+    const color = hslToHex((n * 137.507764 + hash("cloverboard")) % 360, .6 + (n % 5) * .03, .3 + (n % 17) * .01).toLowerCase();
+    if (!used.has(color)) return poolEntry(color);
+  }
+  return poolEntry(hslToHex((state.sequence.length * 137.507764) % 360, .7, .5));
+}
+
+function extendSequence(state: PaletteSequence) {
+  const { pool } = state;
+  foldPicked(state);
+  const fromBases = state.sequence.length < pool.bases.length;
+  const entries = fromBases ? pool.bases : pool.generated;
+  const distances = fromBases ? state.baseDistance : state.generatedDistance;
+  let best: PoolEntry | undefined, bestScore = -Infinity;
+  for (let i = 0; i < entries.length; i++) {
+    const candidate = entries[i];
+    if (state.sequence.some((entry) => entry.color === candidate.color)) continue;
+    const score = distances[i] + hash(`cloverboard${candidate.color}`) / 2 ** 32 * 1e-6;
+    if (score > bestScore) { bestScore = score; best = candidate; }
+  }
+  state.sequence.push(best ?? fallbackEntry(state));
+}
+
+export function paletteColor(slot: number, selection: PaletteSelection = { kind: "builtin", id: "default" }): string {
+  const state = sequenceFor(selection);
+  while (state.sequence.length <= slot) extendSequence(state);
+  return state.sequence[slot].color;
 }
 
 const VIRIDIS = ["#440154", "#3b528b", "#21918c", "#5ec962", "#fde725"];
@@ -162,45 +155,62 @@ export function continuousColor(value: number, domain: [number, number], theme: 
   const t = Math.max(0, Math.min(1, (value - domain[0]) / (domain[1] - domain[0]))) * (VIRIDIS.length - 1);
   const index = Math.min(VIRIDIS.length - 2, Math.floor(t)), fraction = t - index;
   const a = rgb(VIRIDIS[index]), b = rgb(VIRIDIS[index + 1]);
-  return visibleColor(hex(a.map((v, i) => v + (b[i] - v) * fraction)), theme);
+  return themeColor(hex(a.map((v, i) => v + (b[i] - v) * fraction)), theme);
 }
 
-// Colors are materialized once in settings.runs. Rendering only adapts contrast;
-// it never combines automatic identities, reassignment slots or manual overrides.
+// Colors are materialized once in settings.runs. Rendering only adapts contrast.
 export function resolveColors(runs: RunSummary[], settings: ColorSettings, theme: ResolvedTheme): Map<string, string> {
-  return new Map(runs.map(run => [run.run_id, displayColor(settings.runs[runColorKey(run)]?.color ?? "#747e8b", theme)]));
+  return new Map(runs.map(run => [run.run_id, themeColor(settings.runs[runColorKey(run)]?.color ?? MISSING, theme)]));
 }
 
 function generatedColor(run: RunSummary, settings: ColorSettings): string {
   const value = parameterValue(run, settings.field);
-  if (settings.mode === "continuous") return typeof value === "number" && Number.isFinite(value) ? continuousColor(value, settings.domain, "light") : "#747e8b";
-  if (value === undefined) return "#747e8b";
+  if (settings.mode === "continuous") return typeof value === "number" && Number.isFinite(value) ? continuousColor(value, settings.domain, "light") : MISSING;
+  if (value === undefined) return MISSING;
   const slot = hash(categoryKey(settings.field, value)) % paletteBaseColors(settings.palette).length;
   const base = rgb(paletteColor(slot, settings.palette)), blend = (hash(runColorKey(run)) % 3) * .07;
   return hex(base.map(channel => channel * (1 - blend)));
 }
 
-// With no selection, fill only new runs. An explicit selection replaces colors
-// for those runs, while fixed and unselected entries remain untouched.
-export function assignColors(runs: RunSummary[], settings: ColorSettings, selected?: Set<string>): ColorSettings {
+export interface AssignScope {
+  // Runs allowed to change. Without it, only runs that have no color yet move.
+  selected?: Set<string>;
+  // Primary avoidance set. Defaults to every run passed to assignColors.
+  avoid?: RunSummary[];
+  // Secondary tie-breaker, typically the unchecked runs. It never reduces the
+  // spacing achieved among the primary set.
+  fallback?: RunSummary[];
+}
+
+// New runs fill against the whole workspace. An explicit selection reassigns those
+// runs and optimizes their spacing; other runs only break ties and block exact reuse.
+export function assignColors(runs: RunSummary[], settings: ColorSettings, scope: AssignScope = {}): ColorSettings {
   const movable = runs.filter(run => {
     const entry = settings.runs[runColorKey(run)];
-    return !entry?.fixed && (selected ? selected.has(run.run_id) : !entry);
+    return !entry?.fixed && (scope.selected ? scope.selected.has(run.run_id) : !entry);
   }).sort((a, b) => runColorKey(a).localeCompare(runColorKey(b)));
   if (!movable.length) return settings;
   const next = { ...settings, runs: { ...settings.runs } };
   const moving = new Set(movable.map(runColorKey));
-  const occupied = runs.filter(run => !moving.has(runColorKey(run))).flatMap(run => {
+  const colorList = (source: RunSummary[]) => source.filter(run => !moving.has(runColorKey(run))).flatMap(run => {
     const entry = settings.runs[runColorKey(run)];
     return entry ? [entry.color] : [];
   });
-  const colorLabs = (color: string) => ({ light: lab(displayColor(color, "light")), dark: lab(displayColor(color, "dark")) });
-  const distance = (a: ReturnType<typeof colorLabs>, b: ReturnType<typeof colorLabs>) => Math.min(labDistance(a.light, b.light), labDistance(a.dark, b.dark));
-  const occupiedLabs = occupied.map(colorLabs), used = new Set(occupied);
-  const candidates = settings.mode === "random" ? Array.from({ length: Math.max(32, runs.length * 2) }, (_, i) => {
-    const color = paletteColor(i, settings.palette), labs = colorLabs(color);
-    return { color, labs, score: occupiedLabs.length ? Math.min(...occupiedLabs.map(other => distance(labs, other))) : Infinity };
+  const occupied = colorList(scope.avoid ?? runs), fallback = colorList(scope.fallback ?? []);
+  const occupiedLabs = occupied.map(sourceLabs), fallbackLabs = fallback.map(sourceLabs);
+  const used = new Set([...occupied, ...fallback].map(color => color.toLowerCase()));
+  // Reserve enough palette slots for the whole visible scope, not just the movable
+  // runs: unchecked colors block exact reuse, so a small pool can be fully occupied.
+  const referenceCount = runs.length + (scope.fallback?.length ?? 0);
+  const candidates = settings.mode === "random" ? Array.from({ length: Math.max(32, Math.min(512, referenceCount * 2)) }, (_, index) => {
+    const color = paletteColor(index, settings.palette), labs = sourceLabs(color);
+    return {
+      color, labs,
+      primary: occupiedLabs.length ? Math.min(...occupiedLabs.map(other => labSeparation(labs, other))) : Infinity,
+      secondary: fallbackLabs.length ? Math.min(...fallbackLabs.map(other => labSeparation(labs, other))) : Infinity,
+    };
   }) : [];
+  const score = (candidate: typeof candidates[number]) => candidate.primary === Infinity ? candidate.secondary : candidate.primary + .02 * Math.min(candidate.secondary, 1);
   for (const run of movable) {
     const key = runColorKey(run);
     let color: string;
@@ -208,20 +218,24 @@ export function assignColors(runs: RunSummary[], settings: ColorSettings, select
       const old = settings.runs[key]?.color;
       let best: typeof candidates[number] | undefined;
       for (const candidate of candidates) {
-        if (candidate.color === old || used.has(candidate.color)) continue;
-        if (!best || candidate.score > best.score) best = candidate;
+        if (candidate.color === old?.toLowerCase() || used.has(candidate.color)) continue;
+        if (!best || score(candidate) > score(best)) best = candidate;
       }
       color = best?.color ?? old ?? paletteColor(used.size, settings.palette);
-      if (best) for (const candidate of candidates) candidate.score = Math.min(candidate.score, distance(candidate.labs, best.labs));
+      if (best) for (const candidate of candidates) {
+        const separation = labSeparation(candidate.labs, best.labs);
+        candidate.primary = Math.min(candidate.primary, separation);
+        candidate.secondary = Math.min(candidate.secondary, separation);
+      }
     } else color = generatedColor(run, settings);
     next.runs[key] = { color, fixed: false };
-    used.add(color);
+    used.add(color.toLowerCase());
   }
   return next;
 }
 
 export function recolorRuns(runs: RunSummary[], settings: ColorSettings): ColorSettings {
-  return assignColors(runs, settings, new Set(runs.map(run => run.run_id)));
+  return assignColors(runs, settings, { selected: new Set(runs.map(run => run.run_id)) });
 }
 
 export interface ColorUndo { before: ColorSettings["runs"]; after: ColorSettings["runs"] }

@@ -8,7 +8,7 @@ import ts from "typescript";
 
 const directory = await mkdtemp(join(tmpdir(), "cloverboard-tests-"));
 after(() => rm(directory, { recursive: true, force: true }));
-for (const name of ["palettes", "comparison", "features", "targets", "chartMath", "colors", "api", "workspace", "readout", "imageTimeline", "dataCache", "runSelection"]) {
+for (const name of ["palettes", "comparison", "features", "targets", "chartMath", "colorMath", "colors", "api", "workspace", "readout", "imageTimeline", "dataCache", "runSelection"]) {
   const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), "utf8");
   let { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
   outputText = outputText.replace(/from "\.\/([^"]+)"/g, 'from "./$1.mjs"').replace('from "react"', `from "${pathToFileURL(resolve("node_modules/react/index.js")).href}"`);
@@ -20,6 +20,7 @@ const builtinPalette = (id) => ({ kind: "builtin", id });
 const customPalette = { kind: "custom", id: "custom:" + "a".repeat(32), name: "Ocean", colors: ["#7ecef4", "#ea68a2", "#ff9a52", "#a2db86"] };
 const feature = await import(pathToFileURL(join(directory, "features.mjs")));
 const targets = await import(pathToFileURL(join(directory, "targets.mjs")));
+const colorMath = await import(pathToFileURL(join(directory, "colorMath.mjs")));
 const colors = await import(pathToFileURL(join(directory, "colors.mjs")));
 const readout = await import(pathToFileURL(join(directory, "readout.mjs")));
 const { imagesAtStep, sampleSteps } = await import(pathToFileURL(join(directory, "imageTimeline.mjs")));
@@ -375,8 +376,8 @@ test("target delta is signed Raw for either direction including a zero target", 
 });
 
 test("color picker round-trips primaries, gray, black and arbitrary HEX", () => {
-  for (const color of ["#000000", "#ffffff", "#808080", "#ff0000", "#00ff00", "#0000ff", "#3276b8", "#c98ba5"]) assert.equal(colors.hsvToHex(colors.hexToHsv(color)), color);
-  assert.equal(colors.hsvToHex({ h: 360, s: 1, v: 1 }), "#ff0000");
+  for (const color of ["#000000", "#ffffff", "#808080", "#ff0000", "#00ff00", "#0000ff", "#3276b8", "#c98ba5"]) assert.equal(colorMath.hsvToHex(colorMath.hexToHsv(color)), color);
+  assert.equal(colorMath.hsvToHex({ h: 360, s: 1, v: 1 }), "#ff0000");
 });
 
 test("time, difference and fixed warmup preferences survive view normalization", () => {
@@ -448,12 +449,13 @@ test("hover order follows the rendered values, keeps baseline first and supports
   assert.deepEqual(ordered(false, null, "list"), rows.map((row) => row.run.run_id));
 });
 
-test("palette source colors retain authored order and contrast in both themes", () => {
+test("palette sources are unique, maximin-ordered, and meet theme contrast", () => {
   for (const palette of [builtinPalette("default"), builtinPalette("bright"), customPalette]) {
+    const bases = palettes.paletteBaseColors(palette).map(c => c.toLowerCase());
     const source = Array.from({ length: 40 }, (_, i) => colors.paletteColor(i, palette));
     assert.equal(new Set(source).size, source.length);
-    if (palette.id !== "default") assert.deepEqual(source.slice(0, palette.colors?.length ?? 12), palettes.paletteBaseColors(palette).map(c => c.toLowerCase()));
-    for (const theme of ["light", "dark"]) assert.ok(source.every(color => colors.contrast(colors.visibleColor(color, theme, palette), theme === "light" ? "#ffffff" : "#222831") >= (theme === "light" && palette.id !== "default" ? 2 : 3)));
+    assert.deepEqual([...source.slice(0, bases.length)].sort(), [...bases].sort());
+    for (const theme of ["light", "dark"]) assert.ok(source.every(color => colorMath.contrast(colors.themeColor(color, theme), theme === "light" ? "#ffffff" : "#222831") >= (theme === "light" ? 2 : 3) - 1e-9));
   }
 });
 
@@ -477,14 +479,45 @@ test("fixed and unselected colors survive reassign; unfixing keeps color until n
   const key = feature.runColorKey(runs[0]);
   const settings = { ...original, runs: { ...original.runs, [key]: { color: "#9966aa", fixed: true } } };
   const before = structuredClone(settings);
-  const next = colors.assignColors(runs, settings, new Set(["a", "b"]));
+  const next = colors.assignColors(runs, settings, { selected: new Set(["a", "b"]) });
   assert.deepEqual(next.runs[key], settings.runs[key]);
   assert.deepEqual(next.runs[feature.runColorKey(runs[2])], settings.runs[feature.runColorKey(runs[2])]);
   assert.notEqual(next.runs[feature.runColorKey(runs[1])].color, settings.runs[feature.runColorKey(runs[1])].color);
   assert.deepEqual(settings, before); // The original map is also a complete Undo snapshot.
   const unlocked = { ...next, runs: { ...next.runs, [key]: { ...next.runs[key], fixed: false } } };
   assert.equal(colors.assignColors(runs, unlocked).runs[key].color, "#9966aa");
-  assert.notEqual(colors.assignColors(runs, unlocked, new Set(["a"])).runs[key].color, "#9966aa");
+  assert.notEqual(colors.assignColors(runs, unlocked, { selected: new Set(["a"]) }).runs[key].color, "#9966aa");
+});
+
+test("theme colors use one contrast rule and are idempotent", () => {
+  const sources = [...palettes.DEFAULT_COLORS, ...palettes.BRIGHT_COLORS, "#ffffff", "#000000", "#747e8b"];
+  for (const source of sources) for (const theme of ["light", "dark"]) {
+    const shown = colors.themeColor(source, theme);
+    const background = theme === "light" ? "#ffffff" : "#222831";
+    assert.ok(colorMath.contrast(shown, background) >= (theme === "light" ? 2 : 3) - 1e-9);
+    assert.equal(colors.themeColor(shown, theme), shown);
+  }
+});
+
+test("Reassign scopes spacing to the checked runs and keeps checked fixed colors", () => {
+  const runs = Array.from({ length: 20 }, (_, i) => run(`r${i}`));
+  const settings = colors.assignColors(runs, feature.defaultColors());
+  const selectedIds = new Set(["r0", "r1", "r2"]);
+  const selectedRuns = runs.filter(r => selectedIds.has(r.run_id));
+  const otherRuns = runs.filter(r => !selectedIds.has(r.run_id));
+  const fixedKey = feature.runColorKey(selectedRuns[0]);
+  const withFixed = { ...settings, runs: { ...settings.runs, [fixedKey]: { color: "#9966aa", fixed: true } } };
+  const before = structuredClone(withFixed);
+  const next = colors.assignColors(selectedRuns, withFixed, { selected: selectedIds, avoid: selectedRuns, fallback: otherRuns });
+  assert.deepEqual(next.runs[fixedKey], withFixed.runs[fixedKey]);
+  for (const item of otherRuns) assert.deepEqual(next.runs[feature.runColorKey(item)], withFixed.runs[feature.runColorKey(item)]);
+  const moved = selectedRuns.slice(1);
+  for (const item of moved) assert.notEqual(next.runs[feature.runColorKey(item)].color, withFixed.runs[feature.runColorKey(item)].color);
+  const a = next.runs[feature.runColorKey(moved[0])].color, b = next.runs[feature.runColorKey(moved[1])].color;
+  assert.ok(colors.colorSeparation(a, b) >= .1);
+  assert.ok(colors.colorSeparation(a, "#9966aa") >= .1);
+  assert.ok(colors.colorSeparation(b, "#9966aa") >= .1);
+  assert.deepEqual(withFixed, before);
 });
 
 test("palette and mode changes write current colors directly and preserve fixed colors", () => {

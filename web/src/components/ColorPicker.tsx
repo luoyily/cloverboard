@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
-import { hexToHsv, hsvToHex, type Hsv } from "../colors";
+import { hexToHsv, hsvToHex, type Hsv } from "../colorMath";
 
 export default function ColorPicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const [hsv, setHsv] = useState(() => hexToHsv(/^#[0-9a-f]{6}$/i.test(value) ? value : "#3276b8"));

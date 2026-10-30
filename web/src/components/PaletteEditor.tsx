@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { XIcon } from "@phosphor-icons/react";
-import { paletteColor, visibleColor } from "../colors";
-import { paletteError, type PaletteInput, type PaletteSelection } from "../palettes";
+import { colorSeparation, paletteColor, SIMILAR_COLOR_DISTANCE, themeColor } from "../colors";
+import { paletteError, type PaletteInput } from "../palettes";
 import ColorPicker from "./ColorPicker";
 
 export default function PaletteEditor({ initial, editing, onSave, onClose }: { initial: PaletteInput; editing: boolean; onSave: (input: PaletteInput) => Promise<void>; onClose: () => void }) {
@@ -14,7 +14,12 @@ export default function PaletteEditor({ initial, editing, onSave, onClose }: { i
   const [busy, setBusy] = useState(false);
   useEffect(() => { const element = dialog.current; element?.showModal(); return () => element?.close(); }, []);
   const validation = paletteError(name, colors);
-  const selection: PaletteSelection = { kind: "custom", id: "draft", name, colors };
+  const closePair = (() => {
+    for (let i = 0; i < colors.length; i++) for (let j = i + 1; j < colors.length; j++) {
+      if (/^#[0-9a-f]{6}$/i.test(colors[i]) && /^#[0-9a-f]{6}$/i.test(colors[j]) && colorSeparation(colors[i], colors[j]) < SIMILAR_COLOR_DISTANCE) return [colors[i], colors[j]] as const;
+    }
+    return null;
+  })();
   function changeColor(value: string) { setColors(colors.map((color, i) => i === active ? value : color)); setError(""); }
   function move(delta: number) {
     const target = active + delta, next = [...colors];
@@ -44,8 +49,9 @@ export default function PaletteEditor({ initial, editing, onSave, onClose }: { i
         if (issue) { setError(issue); return; }
         setColors(next); setActive(0); setBulk(""); setError("");
       }}>Replace colors</button></div></details>
-      <div className="palette-theme-previews">{(["light", "dark"] as const).map((theme) => <div key={theme} className={`palette-theme-preview preview-${theme}`}><span>{theme === "light" ? "Light" : "Dark"}</span><div className="palette-preview" role="img" aria-label={`${theme} palette preview`}>{colors.map((color, i) => <span key={i} style={{ background: /^#[0-9a-f]{6}$/i.test(color) ? visibleColor(color, theme, selection) : "transparent" }} />)}</div></div>)}</div>
-      <p className="field-help">2–24 unique colors. Curves follow this order, then use additional shades. Light and dark previews show the displayed colors.</p>
+      <div className="palette-theme-previews">{(["light", "dark"] as const).map((theme) => <div key={theme} className={`palette-theme-preview preview-${theme}`}><span>{theme === "light" ? "Light" : "Dark"}</span><div className="palette-preview" role="img" aria-label={`${theme} palette preview`}>{colors.map((color, i) => <span key={i} style={{ background: /^#[0-9a-f]{6}$/i.test(color) ? themeColor(color, theme) : "transparent" }} />)}</div></div>)}</div>
+      {closePair && <p className="field-help">Base colors {closePair[0]} and {closePair[1]} are hard to distinguish in at least one theme.</p>}
+      <p className="field-help">2–24 unique colors. Curves use these as the base palette, then additional shades. Light and dark previews show the displayed colors.</p>
       {(error || validation) && <p className="field-help" role="alert">{error || validation}</p>}
     </fieldset>
     <div className="appearance-footer"><button className="button quiet-button" disabled={busy} onClick={onClose}>Cancel</button><button className="button primary-button" disabled={!!validation || busy} onClick={() => void save()}>{busy ? "Saving…" : "Save palette"}</button></div>

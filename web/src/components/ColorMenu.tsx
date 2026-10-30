@@ -3,7 +3,7 @@ import { useState } from "react";
 import { PaletteIcon } from "@phosphor-icons/react";
 import type { RunSummary } from "../api";
 import { flattenConfig } from "../comparison";
-import { assignColors, recolorRuns, paletteColor, visibleColor, undoColors, type ColorUndo } from "../colors";
+import { assignColors, recolorRuns, themeColor, undoColors, type ColorUndo } from "../colors";
 import { parameterValue, type ColorSettings } from "../features";
 import type { ResolvedTheme } from "../theme";
 import { paletteBaseColors, paletteKey, paletteName, type CustomPalette, type PaletteInput } from "../palettes";
@@ -21,6 +21,8 @@ export default function ColorMenu({ runs, selectedIds, settings, theme, palettes
   const savedPalette = palettes.find((item) => item.id === settings.palette.id);
   const snapshotOnly = settings.palette.kind === "custom" && (!savedPalette || paletteKey({ kind: "custom", ...savedPalette }) !== paletteKey(settings.palette) || savedPalette.name !== settings.palette.name);
   const baseColors = paletteBaseColors(settings.palette);
+  const selectedRuns = runs.filter((run) => selectedIds.has(run.run_id));
+  const otherRuns = runs.filter((run) => !selectedIds.has(run.run_id));
   const editablePalette = savedPalette;
   const canCreate = ready && palettes.length < MAX_PALETTES;
   const fields = [...new Set(runs.flatMap((r) => [...flattenConfig(r.config).keys()]))].sort();
@@ -66,9 +68,9 @@ export default function ColorMenu({ runs, selectedIds, settings, theme, palettes
           {snapshotOnly && <option value="view-snapshot">{paletteName(settings.palette)} · View snapshot</option>}
         </Select></label>
         <div className="palette-preview" role="img" aria-label={`${paletteName(settings.palette)} palette, ${baseColors.length} colors`}>
-          {Array.from({ length: baseColors.length }, (_, i) => {
-            const color = visibleColor(paletteColor(i, settings.palette), theme, settings.palette);
-            return <span key={i} style={{ background: color }} title={color} />;
+          {baseColors.map((color, i) => {
+            const shown = themeColor(color, theme);
+            return <span key={`${color}-${i}`} style={{ background: shown }} title={shown} />;
           })}
         </div>
         <p className="field-help">{baseColors.length} base colors, with additional shades for more {settings.mode === "parameter" ? "families" : "runs"}. Colors adapt to light and dark backgrounds.</p>
@@ -83,8 +85,8 @@ export default function ColorMenu({ runs, selectedIds, settings, theme, palettes
         {!ready ? <p className="field-help">Loading palette library…</p> : !canCreate && <p className="field-help">Limit reached: {MAX_PALETTES} palettes.</p>}
       </>}
       {settings.mode === "random" && <>
-        <p className="field-help">Click a run’s swatch to edit or fix its color. Fixed colors survive palette and mode changes.</p>
-        <div className="inline-fields"><button className="button quiet-button" disabled={selectedIds.size === 0} onClick={() => { const next = assignColors(runs, settings, selectedIds); setUndo({ before: settings.runs, after: next.runs }); onChange(next); }}>Reassign selected</button><button className="button quiet-button" disabled={!undo} onClick={() => { if (undo) onChange(undoColors(settings, undo)); setUndo(null); }}>Undo</button></div>
+        <p className="field-help">Click a run’s swatch to edit or fix its color. Fixed colors survive palette and mode changes. Reassign optimizes the checked runs; unchecked runs only break ties.</p>
+        <div className="inline-fields"><button className="button quiet-button" disabled={selectedIds.size === 0} onClick={() => { const next = assignColors(selectedRuns, settings, { selected: selectedIds, avoid: selectedRuns, fallback: otherRuns }); setUndo({ before: settings.runs, after: next.runs }); onChange(next); }}>Reassign selected</button><button className="button quiet-button" disabled={!undo} onClick={() => { if (undo) onChange(undoColors(settings, undo)); setUndo(null); }}>Undo</button></div>
       </>}
       {error && <p className="field-help" role="alert">{error}</p>}
     </div>
