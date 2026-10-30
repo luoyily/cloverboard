@@ -507,8 +507,9 @@ button:disabled { cursor: default; opacity: 0.45; }
 .metric-group-heading > svg { flex: none; color: var(--text-muted); }
 .metric-group-name { min-width: 0; overflow-wrap: anywhere; }
 .metric-group-count { flex: none; color: var(--text-muted); font-size: 12px; font-weight: 400; }
-.metric-group-charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 14px; container-type: inline-size; }
-.chart-expanded { grid-column: 1 / -1; }
+.metric-group-charts { --chart-width: 380px; display: flex; flex-wrap: wrap; gap: 14px; container-type: inline-size; }
+.metric-group-charts > .chart-card { flex: 0 0 var(--chart-width); max-width: 100%; }
+.metric-group-charts > .chart-expanded { flex: 1 0 100%; }
 @container (max-width: 773px) { .chart-expand-button { display: none; } }
 
 .chart-card {
@@ -1130,7 +1131,7 @@ select.text-input option, select.text-input optgroup { background: var(--surface
 .notes-markdown code { font-family: var(--font-mono); font-size: 12px; }
 .notes-markdown blockquote { border-left: 2px solid var(--border); padding-left: 12px; margin-left: 0; color: var(--text-muted); }
 .notes-editor-footer { flex-wrap: wrap; }
-@media (max-width: 600px) { .metric-group-charts { grid-template-columns: minmax(0, 1fr); } .notes-heading { align-items: flex-start; } }
+@media (max-width: 600px) { .metric-group-charts > .chart-card { flex-basis: 100%; } .notes-heading { align-items: flex-start; } }
 
 .toolbar-actions { padding-left: 10px; border-left: 1px solid var(--border); }
 .toolbar-right .popover-trigger { color: var(--text); }
@@ -1203,7 +1204,7 @@ select.text-input option, select.text-input optgroup { background: var(--surface
 .recent-run-options { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .sidebar-resize { position: absolute; top: 48px; bottom: 0; right: -4px; width: 8px; z-index: 12; cursor: col-resize; touch-action: none; }
 .sidebar-resize:hover, .sidebar-resize:focus-visible { background: color-mix(in srgb, var(--accent) 25%, transparent); outline: none; }
-.chart-density-compact .metric-group-charts { grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 10px; }
+.chart-density-compact .metric-group-charts { --chart-width: 300px; gap: 10px; }
 .target-metric-choice { display: grid; gap: 4px; color: var(--text-muted); font-size: 12px; padding: 6px 8px; }
 .targets-menu .menu-popover, .target-cell-menu .menu-popover, .metric-menu .menu-popover { width: min(var(--popover-wide), calc(100vw - 24px)); }
 .targets-menu .menu-popover, .target-cell-menu .menu-popover { max-height: calc(100dvh - 24px); overflow: auto; }

@@ -1,15 +1,15 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { scaleLinear, scaleLog } from "d3-scale";
 import { ArrowCounterClockwiseIcon, ArrowsHorizontalIcon, ArrowsInLineHorizontalIcon, WarningIcon } from "@phosphor-icons/react";
-import { seriesKey, type RunSummary, type ScalarPoint, type ScalarSummary } from "../api";
+import { seriesKey, type RunSummary, type ScalarSummary } from "../api";
 import { baselineDelta, deltaColumns, targetDelta, targetMet, type ChartZoom, type TimeDisplay, type DeltaDisplay } from "../features";
 import type { NamedTarget } from "../targets";
 import type { WorkspaceUpdate } from "../workspace";
 import type { MetricSeries } from "../scalarSeries";
 import { formatMetric, runLabel } from "../comparison";
-import { buildPath, compareReadouts, fittedDomain, logTicks, nearestPoint, stepAxis, visiblePoints } from "../chartMath";
+import { buildPath, compareReadouts, fittedDomain, logTicks, lonePoint, nearestPoint, stepAxis, visiblePoints } from "../chartMath";
 import MetricMenu from "./MetricMenu";
-import { elapsedTime, formatDuration, formatWallTime, timeOriginLabel, type ReadoutPlacement } from "../readout";
+import { elapsedTime, formatDuration, formatTableTime, formatWallTime, timeOriginLabel, type ReadoutPlacement } from "../readout";
 import { useSettledDomain, useWarmupRange } from "../useChartRange";
 import FloatingReadout from "./FloatingReadout";
 import ChartLegend from "./ChartLegend";
@@ -146,6 +146,11 @@ export default memo(function MetricChart({ metric, title, loading, dataTick, exp
     rawPath: smoothing > 0 ? buildPath(entry.points, x, y, false, logarithmic) : "",
     path: buildPath(entry.points, x, y, smoothing > 0, logarithmic),
   })) : [], [drawing, x, y, smoothing, logarithmic, measuredWidth]);
+  // A lone valid sample has no line to draw; render it as a marker instead.
+  const lonePoints = useMemo(() => drawing.flatMap((entry) => {
+    const lone = lonePoint(entry.points, smoothing > 0, logarithmic, minStep, maxStep);
+    return lone ? [{ entry, ...lone }] : [];
+  }), [drawing, smoothing, logarithmic, minStep, maxStep]);
   const hover = hoverStep === null ? [] : entries.map((entry) => ({ ...entry, point: nearestPoint(entry.points, hoverStep) }))
     .sort((a, b) => compareReadouts(a, b, smoothing > 0, baselineId, tooltipSort));
   const baseline = hover.find((e) => e.run.run_id === baselineId);
@@ -228,6 +233,10 @@ export default memo(function MetricChart({ metric, title, loading, dataTick, exp
           </g>
           <g clipPath={`url(#${clipId})`}>
             {targetVisible && <g className="target-line"><line x2={plotWidth} y1={targetY!} y2={targetY!} /></g>}
+            {lonePoints.map(({ entry, point, value }) => {
+              const dimmed = focusedId ? entry.run.run_id !== focusedId : topIds && !topIds.has(entry.run.run_id) && entry.run.run_id !== baselineId;
+              return <circle key={entry.run.run_id} cx={x(point.step)} cy={y(value)} r={3} fill={entry.color} opacity={dimmed ? .18 : 1} />;
+            })}
             {first && first.step >= minStep && first.step <= maxStep && first.value !== null && (!logarithmic || first.value > 0) && focused && <g><circle cx={x(first.step)} cy={y(first.value)} r={4} fill="var(--surface)" stroke={focused.color} strokeWidth={1.5} /><text className="first-hit-text" x={Math.min(plotWidth - 90, Math.max(0, x(first.step) + 7))} y={Math.max(12, y(first.value) - 7)}>First hit @{first.step}</text></g>}
             {hoverStep !== null && !drag.current && <><line className="hover-line" x1={x(hoverStep)} x2={x(hoverStep)} y2={plotHeight} />{hover.map((e) => { const value = smoothing > 0 ? e.point?.smoothed : e.point?.value; return value != null && Number.isFinite(value) && (!logarithmic || value > 0) && e.point && e.point.step >= minStep && e.point.step <= maxStep ? <circle key={e.run.run_id} cx={x(e.point.step)} cy={y(value)} r={3} fill="var(--surface)" stroke={e.color} strokeWidth={1.6} /> : null; })}</>}
             {box && <rect className="brush-box" x={Math.min(box.x, box.endX)} y={Math.min(box.y, box.endY)} width={Math.abs(box.x - box.endX)} height={Math.abs(box.y - box.endY)} />}
@@ -256,7 +265,7 @@ export default memo(function MetricChart({ metric, title, loading, dataTick, exp
             {smoothing > 0 && <span title={`EMA: ${entry.point?.smoothed ?? "unavailable"}`}>{formatReadout(entry.point?.smoothed, tooltipDecimals)}</span>}
             {columns.baseline && <span title={delta !== null ? `Raw − baseline Raw: ${delta}` : id === baselineId ? "Baseline" : "Δ unavailable: missing or invalid sample"}>{formatDelta(delta, tooltipDecimals)}</span>}
             {columns.target && <span title={`Raw − target: ${targetDifference ?? "unavailable"}`}>{formatDelta(targetDifference, tooltipDecimals)}</span>}
-            {timeDisplay !== "hidden" && <span title={`${timeOriginLabel(entry.run)} · ${formatWallTime(entry.point?.wall_time, true)}`}>{timeDisplay === "wall" ? formatWallTime(entry.point?.wall_time) : `${elapsed !== null && entry.run.time_origin_kind === "first_sample" ? "~" : ""}${formatDuration(elapsed)}`}</span>}
+            {timeDisplay !== "hidden" && <span title={`${timeOriginLabel(entry.run)} · ${formatWallTime(entry.point?.wall_time, true)}`}>{timeDisplay === "wall" ? formatTableTime(entry.point?.wall_time) : `${elapsed !== null && entry.run.time_origin_kind === "first_sample" ? "~" : ""}${formatDuration(elapsed)}`}</span>}
           </button>;
         })}
         </div>

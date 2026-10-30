@@ -24,7 +24,7 @@ const colorMath = await import(pathToFileURL(join(directory, "colorMath.mjs")));
 const colors = await import(pathToFileURL(join(directory, "colors.mjs")));
 const readout = await import(pathToFileURL(join(directory, "readout.mjs")));
 const { imagesAtStep, sampleSteps } = await import(pathToFileURL(join(directory, "imageTimeline.mjs")));
-const { nearestPoint, buildPath, compareReadouts, valueDomain, fittedDomain, logTicks, visiblePoints, tailStepRange, stepAxis } = await import(pathToFileURL(join(directory, "chartMath.mjs")));
+const { nearestPoint, buildPath, compareReadouts, valueDomain, fittedDomain, logTicks, visiblePoints, tailStepRange, stepAxis, lonePoint } = await import(pathToFileURL(join(directory, "chartMath.mjs")));
 const { pooledResults, getJson, fetchRunsWithEtag } = await import(pathToFileURL(join(directory, "api.mjs")));
 const { BoundedCache, RequestCache } = await import(pathToFileURL(join(directory, "dataCache.mjs")));
 const { defaultWorkspaceState, normalizeState, viewStateKey, encodeSharedState, readSharedLocation } = await import(pathToFileURL(join(directory, "workspace.mjs")));
@@ -82,11 +82,13 @@ test("tail shortcuts use the whole Step span and keep small/nonzero ranges valid
   assert.deepEqual(tailStepRange([10, 10], 50), [10, 10]);
 });
 
-test("Step axis leaves right-side room and shows a nearby round endpoint", () => {
+test("Step axis uses equal insets and shows a nearby round endpoint", () => {
   for (const width of [160, 300, 440, 1000]) {
     const axis = stepAxis(0, 999, width);
-    assert.ok(width - axis.dataWidth >= 12 - 1e-9);
-    assert.ok(width - axis.dataWidth <= 20 + 1e-9);
+    const inset = width - axis.dataWidth;
+    assert.ok(inset >= 12 - 1e-9);
+    assert.ok(inset <= 20 + 1e-9);
+    assert.ok(Math.abs(axis.scale(0) - inset) < 1e-9);
     assert.equal(axis.ticks.at(-1).step, 1000);
     assert.equal(axis.ticks.at(-1).label, "1000");
     assert.equal(axis.stepAt(width), 999);
@@ -94,6 +96,25 @@ test("Step axis leaves right-side room and shows a nearby round endpoint", () =>
     assert.equal(axis.stepAt(-20), 0);
     assert.ok(Math.abs(axis.stepAt(axis.scale(500)) - 500) < 1e-9);
   }
+});
+
+test("a single Step is centered and stays readable", () => {
+  const axis = stepAxis(10, 10, 300);
+  assert.equal(axis.ticks.length, 1);
+  assert.equal(axis.ticks[0].step, 10);
+  assert.ok(Math.abs(axis.scale(10) - 150) < 1e-9);
+  assert.ok(Math.abs(axis.dataWidth - 150) < 1e-9);
+  assert.equal(axis.stepAt(0), 10);
+  assert.equal(axis.stepAt(300), 10);
+});
+
+test("a single visible sample is reported as a lone point", () => {
+  const one = [{ step: 5, value: .5, wall_time: 1 }];
+  assert.deepEqual(lonePoint(one, false, false, 0, 10), { point: one[0], value: .5 });
+  assert.equal(lonePoint(one, false, false, 6, 10), undefined);
+  assert.equal(lonePoint([...one, { step: 6, value: .6, wall_time: 2 }], false, false, 0, 10), undefined);
+  assert.equal(lonePoint([{ step: 5, value: null, wall_time: 1 }], false, false, 0, 10), undefined);
+  assert.equal(lonePoint([{ step: 5, value: -1, wall_time: 1 }], false, true, 0, 10), undefined);
 });
 
 test("zoomed Step axis preserves exact bounds and an irregular endpoint label", () => {

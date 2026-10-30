@@ -8,8 +8,15 @@ interface ReadoutSample {
 
 export function stepAxis(minimum: number, maximum: number, width: number) {
   const padding = Math.min(20, Math.max(12, width * .04));
-  const span = maximum - minimum || 1;
-  const scale = scaleLinear().domain([minimum, minimum + span * width / (width - padding)]).range([0, width]);
+  const span = maximum - minimum;
+  const dataSpan = Math.max(1, width - padding * 2);
+  // Equal insets keep endpoint markers visible on both sides. For a normal range
+  // the domain is extended past the last sample so a nearby round tick (1000 for
+  // a 999 maximum) can sit in the right inset without moving the data endpoint.
+  // A single Step uses a symmetric domain and centers in the data area instead.
+  const scale = span
+    ? scaleLinear().domain([minimum, minimum + span * (width - padding) / dataSpan]).range([padding, width])
+    : scaleLinear().domain([minimum - .5, minimum + .5]).range([padding, width - padding]);
   const count = Math.max(2, Math.min(5, Math.floor(width / 85)));
   const regular = scale.ticks(count).filter(Number.isInteger);
   const format = scale.tickFormat(count, Math.max(Math.abs(minimum), Math.abs(maximum)) >= 1000 ? "s" : "d");
@@ -32,7 +39,7 @@ export function stepAxis(minimum: number, maximum: number, width: number) {
     return true;
   });
   const dataWidth = scale(maximum);
-  const stepAt = (pixel: number) => pixel <= 0 ? minimum : pixel >= dataWidth ? maximum : scale.invert(pixel);
+  const stepAt = (pixel: number) => Math.max(minimum, Math.min(maximum, scale.invert(pixel)));
   return { scale, dataWidth, ticks: [...ticks, endTick], stepAt };
 }
 
@@ -58,6 +65,18 @@ export function nearestPoint(points: ScalarPoint[], step: number): ScalarPoint |
   while (low < high) { const mid = (low + high) >>> 1; if (points[mid].step <= step) low = mid + 1; else high = mid; }
   const before = points[Math.max(0, low - 1)], after = points[Math.min(points.length - 1, low)];
   return step - before.step <= after.step - step ? before : after;
+}
+
+// Return the only visible sample for a run, if it has exactly one.
+export function lonePoint(samples: ScalarPoint[], smoothed: boolean, logarithmic: boolean, minimum: number, maximum: number): { point: ScalarPoint; value: number } | undefined {
+  let found: { point: ScalarPoint; value: number } | undefined;
+  for (const point of samples) {
+    const value = smoothed ? point.smoothed : point.value;
+    if (value == null || !Number.isFinite(value) || (logarithmic && value <= 0) || point.step < minimum || point.step > maximum) continue;
+    if (found) return undefined;
+    found = { point, value };
+  }
+  return found;
 }
 
 export function visiblePoints(points: ScalarPoint[], minimum: number, maximum: number): ScalarPoint[] {
