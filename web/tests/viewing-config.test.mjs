@@ -337,7 +337,7 @@ function watchingSettings() {
     tag_filter: ["reviewed"], tag_filter_match: "all", run_sort: "name_desc", panel: "table",
     colors: { ...workspace.defaultWorkspaceState().colors, runs: { trial: { color: "#abcdef", fixed: true } }, top_k: { enabled: true, metric: "score", direction: "max", readout: "best", k: 2 } },
     targets: { score: { items: [{ id: "goal", name: "Goal", chart_label: "G", value: .9, direction: "gte" }], active_id: "goal" } },
-    metric_filter: "loss", chart_density: "compact", show_chart_legend: false, smoothing: .2,
+    metric_filter: "loss", chart_density: "compact", show_chart_legend: false, chart_legend_layout: "single", chart_legend_trim_prefix: true, smoothing: .2,
     y_scale: "log", y_warmup: 100, chart_scales: { score: "linear" }, chart_warmup: { score: null },
     collapsed_groups: ["train"], expanded_charts: ["validation/score"],
     tooltip_decimals: 6, tooltip_sort: "list", tooltip_placement: "horizontal", tooltip_time: "wall", tooltip_delta: "hidden",

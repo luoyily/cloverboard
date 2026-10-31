@@ -6,6 +6,7 @@ import { CaretDownIcon, CaretRightIcon } from "@phosphor-icons/react";
 import MetricChart from "./MetricChart";
 import { effectiveWarmup } from "../features";
 import { activeTarget } from "../targets";
+import { legendLabelMap } from "../comparison";
 
 const EMPTY_SERIES: MetricSeries = new Map();
 
@@ -35,6 +36,10 @@ export default function ChartGrid({ metrics, loadingMetrics, dataTick, runs, ser
     }
     return [...grouped].sort(([a], [b]) => a.localeCompare(b));
   }, [metrics]);
+  const legendLabels = useMemo(
+    () => legendLabelMap(runs, state.chart_legend_trim_prefix),
+    [runs, state.chart_legend_trim_prefix],
+  );
   if (!metrics.length) return <div className="empty">{state.metric_filter ? "No metrics match this filter." : "No metrics in the selected runs."}</div>;
   return <div className={`chart-grid chart-density-${state.chart_density} chart-layout-${state.chart_layout} chart-card-style-${state.chart_card_style}`}>
     {groups.map(([group, fields]) => {
@@ -53,7 +58,7 @@ export default function ChartGrid({ metrics, loadingMetrics, dataTick, runs, ser
           onChange={onChange}
           yScale={state.chart_scales[metric] ?? state.y_scale} scaleOverride={state.chart_scales[metric]}
           tooltipDecimals={state.tooltip_decimals} tooltipSort={state.tooltip_sort} timeDisplay={state.tooltip_time} deltaDisplay={state.tooltip_delta}
-          showLegend={state.show_chart_legend} tooltipPlacement={state.tooltip_placement} onLocateRun={onLocateRun}
+          showLegend={state.show_chart_legend} legendLayout={state.chart_legend_layout} legendLabels={legendLabels} tooltipPlacement={state.tooltip_placement} onLocateRun={onLocateRun}
           warmupStep={effectiveWarmup(state.chart_warmup[metric], state.y_warmup)} warmupOverride={state.chart_warmup[metric]} globalWarmup={state.y_warmup}
           summaries={summaries} target={activeTarget(state.targets[metric])} baselineId={state.baseline_id}
           focusedId={focusedId} onFocusRun={onFocusRun} topIds={topIds}

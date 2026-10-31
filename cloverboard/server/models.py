@@ -252,6 +252,8 @@ class WorkspaceState(BaseModel):
     chart_layout: Literal["left", "fill", "distribute"] = "left"
     chart_card_style: Literal["normal", "transparent"] = "normal"
     show_chart_legend: bool = True
+    chart_legend_layout: Literal["single", "multi"] = "multi"
+    chart_legend_trim_prefix: bool = False
     tag_filter: list[str] = Field(default_factory=list, max_length=64)
     tag_filter_match: Literal["any", "all", "none", "empty"] = "any"
     smoothing: float = Field(default=0.6, ge=0, le=0.95, allow_inf_nan=False)

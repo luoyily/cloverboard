@@ -7,7 +7,7 @@ import SegmentedControl from "./SegmentedControl";
 import WarmupControl from "./WarmupControl";
 import type { TimeDisplay, DeltaDisplay, TopK } from "../features";
 import type { ReadoutPlacement } from "../readout";
-import type { ChartCardStyle, ChartLayout } from "../workspace";
+import type { ChartCardStyle, ChartLayout, ChartLegendMode } from "../workspace";
 
 interface ChartToolbarProps {
   metrics: string[]; topK: TopK; onTopKChange: (value: TopK) => void;
@@ -15,7 +15,8 @@ interface ChartToolbarProps {
   density: "normal" | "compact"; onDensityChange: (value: "normal" | "compact") => void;
   layout: ChartLayout; onLayoutChange: (value: ChartLayout) => void;
   cardStyle: ChartCardStyle; onCardStyleChange: (value: ChartCardStyle) => void;
-  showLegend: boolean; onShowLegendChange: (value: boolean) => void;
+  legendMode: ChartLegendMode; onLegendModeChange: (value: ChartLegendMode) => void;
+  legendTrimPrefix: boolean; onLegendTrimPrefixChange: (value: boolean) => void;
   yScale: "linear" | "log"; onYScaleChange: (value: "linear" | "log") => void;
   warmup: number | null; onWarmupChange: (step: number | null) => void;
   smoothing: number; onSmoothingChange: (value: number) => void;
@@ -26,7 +27,7 @@ interface ChartToolbarProps {
   deltaDisplay: DeltaDisplay; onDeltaDisplayChange: (value: DeltaDisplay) => void;
 }
 
-export default function ChartToolbar({ metrics, topK, onTopKChange, metricFilter, onMetricFilterChange, density, onDensityChange, layout, onLayoutChange, cardStyle, onCardStyleChange, showLegend, onShowLegendChange, yScale, onYScaleChange, warmup, onWarmupChange, smoothing, onSmoothingChange, tooltipDecimals, onTooltipDecimalsChange, tooltipSort, onTooltipSortChange, tooltipPlacement, onTooltipPlacementChange, timeDisplay, onTimeDisplayChange, deltaDisplay, onDeltaDisplayChange }: ChartToolbarProps) {
+export default function ChartToolbar({ metrics, topK, onTopKChange, metricFilter, onMetricFilterChange, density, onDensityChange, layout, onLayoutChange, cardStyle, onCardStyleChange, legendMode, onLegendModeChange, legendTrimPrefix, onLegendTrimPrefixChange, yScale, onYScaleChange, warmup, onWarmupChange, smoothing, onSmoothingChange, tooltipDecimals, onTooltipDecimalsChange, tooltipSort, onTooltipSortChange, tooltipPlacement, onTooltipPlacementChange, timeDisplay, onTimeDisplayChange, deltaDisplay, onDeltaDisplayChange }: ChartToolbarProps) {
   const showBase = deltaDisplay === "baseline" || deltaDisplay === "both";
   const showTarget = deltaDisplay === "target" || deltaDisplay === "both";
   function setDelta(baseline: boolean, target: boolean) {
@@ -40,7 +41,8 @@ export default function ChartToolbar({ metrics, topK, onTopKChange, metricFilter
       <div className="setting-row"><span className="field-label">Density</span><SegmentedControl label="Chart density" value={density} options={[{ value: "normal", label: "Normal" }, { value: "compact", label: "Compact" }]} onChange={onDensityChange} /></div>
       <div className="setting-row"><span className="field-label">Layout</span><SegmentedControl label="Chart layout" value={layout} options={[{ value: "left", label: "Left" }, { value: "fill", label: "Fill" }, { value: "distribute", label: "Distribute" }]} onChange={onLayoutChange} /></div>
       <div className="setting-row"><span className="field-label">Card</span><SegmentedControl label="Chart card style" value={cardStyle} options={[{ value: "normal", label: "Normal" }, { value: "transparent", label: "Transparent" }]} onChange={onCardStyleChange} /></div>
-      <div className="setting-row"><span className="field-label">Legend</span><CheckControl checked={showLegend} onChange={onShowLegendChange}>Show legend</CheckControl></div>
+      <div className="setting-row"><span className="field-label">Legend</span><SegmentedControl label="Legend" value={legendMode} options={[{ value: "hidden", label: "Hidden" }, { value: "single", label: "Single", title: "One run per row" }, { value: "multi", label: "Multi", title: "Several runs per row" }]} onChange={onLegendModeChange} /></div>
+      {legendMode !== "hidden" && <div className="setting-row"><span className="field-label">Names</span><CheckControl checked={legendTrimPrefix} onChange={onLegendTrimPrefixChange} title="Remove the prefix shared by all run names in the legend. Full names remain in tooltips.">Trim common prefix</CheckControl></div>}
       <div className="setting-row"><span className="field-label">Y scale</span><SegmentedControl label="Y scale" value={yScale} options={[{ value: "linear", label: "Linear" }, { value: "log", label: "Log₁₀" }]} onChange={onYScaleChange} /></div>
       <div className="setting-row"><span className="field-label">Y range</span><SegmentedControl label="Y range" value={warmup === null ? "auto" : "warmup"} options={[{ value: "auto", label: "Auto" }, { value: "warmup", label: "Ignore warmup" }]} onChange={(mode) => onWarmupChange(mode === "auto" ? null : warmup ?? 0)} /></div>
       {warmup !== null && <WarmupControl step={warmup} onChange={onWarmupChange} />}

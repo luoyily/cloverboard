@@ -74,3 +74,25 @@ export function runLabel(run: RunSummary): string {
   const name = run.name ?? run.run_id;
   return run.source_label ? `${name} · ${run.source_label}` : name;
 }
+
+export function legendLabelMap(runs: RunSummary[], trimCommonPrefix: boolean): Map<string, string> {
+  const entries = runs.map((run) => ({
+    run,
+    name: run.name ?? run.run_id,
+    suffix: run.source_label ? ` · ${run.source_label}` : "",
+    full: runLabel(run),
+  }));
+  const labels = new Map(entries.map(({ run, full }) => [run.run_id, full]));
+  if (!trimCommonPrefix || entries.length < 2) return labels;
+  let prefix = entries[0].name;
+  for (const entry of entries.slice(1)) {
+    let length = 0;
+    while (length < prefix.length && length < entry.name.length && prefix[length] === entry.name[length]) length++;
+    prefix = prefix.slice(0, length);
+    if (prefix.length < 2) return labels;
+  }
+  const names = entries.map(({ name }) => name.slice(prefix.length).replace(/^[-_/.\s]+/, ""));
+  const short = entries.map((entry, index) => `${names[index]}${entry.suffix}`);
+  if (names.some((name) => !name) || new Set(short).size !== short.length) return labels;
+  return new Map(entries.map((entry, index) => [entry.run.run_id, short[index]]));
+}

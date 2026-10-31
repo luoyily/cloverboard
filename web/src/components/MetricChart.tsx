@@ -4,7 +4,7 @@ import { ArrowCounterClockwiseIcon, ArrowsHorizontalIcon, ArrowsInLineHorizontal
 import { seriesKey, type RunSummary, type ScalarSummary } from "../api";
 import { baselineDelta, deltaColumns, targetDelta, targetMet, type ChartZoom, type TimeDisplay, type DeltaDisplay } from "../features";
 import type { NamedTarget } from "../targets";
-import type { WorkspaceUpdate } from "../workspace";
+import type { WorkspaceUpdate, ChartLegendLayout } from "../workspace";
 import type { MetricSeries } from "../scalarSeries";
 import { formatMetric, runLabel } from "../comparison";
 import { buildPath, compareReadouts, fittedDomain, logTicks, lonePoint, nearestPoint, stepAxis, visiblePoints } from "../chartMath";
@@ -40,6 +40,8 @@ interface MetricChartProps {
   tooltipSort: "value" | "list";
   tooltipPlacement: ReadoutPlacement;
   showLegend: boolean;
+  legendLayout: ChartLegendLayout;
+  legendLabels: Map<string, string>;
   onLocateRun: (id: string) => void;
   timeDisplay: TimeDisplay; deltaDisplay: DeltaDisplay;
   warmupStep?: number; warmupOverride?: number | null; globalWarmup: number | null;
@@ -47,7 +49,7 @@ interface MetricChartProps {
   focusedId: string | null; onFocusRun: (id: string | null) => void; topIds: Set<string> | null;
 }
 
-export default memo(function MetricChart({ metric, title, loading, dataTick, expanded, onChange, yScale, scaleOverride, runs, series, colors, smoothing, tooltipDecimals, tooltipSort, tooltipPlacement, showLegend, onLocateRun, timeDisplay, deltaDisplay, warmupStep, warmupOverride, globalWarmup, summaries, target, baselineId, focusedId, onFocusRun, topIds }: MetricChartProps) {
+export default memo(function MetricChart({ metric, title, loading, dataTick, expanded, onChange, yScale, scaleOverride, runs, series, colors, smoothing, tooltipDecimals, tooltipSort, tooltipPlacement, showLegend, legendLayout, legendLabels, onLocateRun, timeDisplay, deltaDisplay, warmupStep, warmupOverride, globalWarmup, summaries, target, baselineId, focusedId, onFocusRun, topIds }: MetricChartProps) {
   const containerRef = useRef<HTMLDivElement>(null), clipId = useId(), helpId = useId();
   const cardRef = useRef<HTMLElement>(null);
   const targetLabelRef = useRef<SVGGElement>(null);
@@ -272,6 +274,6 @@ export default memo(function MetricChart({ metric, title, loading, dataTick, exp
         {detail && <div className="tooltip-detail"><strong>{runLabel(detail.run)} · Step {detail.point?.step ?? "—"}</strong><span>{formatWallTime(detail.point?.wall_time, true)}</span><span>{timeOriginLabel(detail.run)} · {formatDuration(elapsedTime(detail.point, detail.run))} · includes pauses</span></div>}
       </FloatingReadout>}
     </div>
-    {showLegend && <ChartLegend runs={entries.filter((entry) => entry.points.length > 0).map((entry) => entry.run)} colors={colors} width={width} baselineId={baselineId} focusedId={focusedId} onFocusRun={onFocusRun} onLocateRun={onLocateRun} />}
+    {showLegend && <ChartLegend runs={entries.filter((entry) => entry.points.length > 0).map((entry) => entry.run)} colors={colors} width={width} layout={legendLayout} labels={legendLabels} baselineId={baselineId} focusedId={focusedId} onFocusRun={onFocusRun} onLocateRun={onLocateRun} />}
   </article>;
 });

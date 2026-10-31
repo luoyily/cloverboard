@@ -101,7 +101,9 @@ export default function TopBar({
           density={state.chart_density} onDensityChange={(chart_density) => onChange({ chart_density })}
           layout={state.chart_layout} onLayoutChange={(chart_layout) => onChange({ chart_layout })}
           cardStyle={state.chart_card_style} onCardStyleChange={(chart_card_style) => onChange({ chart_card_style })}
-          showLegend={state.show_chart_legend} onShowLegendChange={(show_chart_legend) => onChange({ show_chart_legend })}
+          legendMode={state.show_chart_legend ? state.chart_legend_layout : "hidden"}
+          onLegendModeChange={(mode) => onChange(mode === "hidden" ? { show_chart_legend: false } : { show_chart_legend: true, chart_legend_layout: mode })}
+          legendTrimPrefix={state.chart_legend_trim_prefix} onLegendTrimPrefixChange={(chart_legend_trim_prefix) => onChange({ chart_legend_trim_prefix })}
           yScale={state.y_scale} onYScaleChange={(y_scale) => onChange({ y_scale })}
           warmup={state.y_warmup} onWarmupChange={(y_warmup) => onChange({ y_warmup })}
           smoothing={state.smoothing} onSmoothingChange={(value) => onChange({ smoothing: value })}
