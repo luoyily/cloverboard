@@ -59,6 +59,19 @@ cloverboard serve --logdir ./runs
 访问 [http://127.0.0.1:7230](http://127.0.0.1:7230)。WebUI 与 MCP 端点
 在同一个进程中启动。
 
+## 升级已有数据
+
+安装新版本后，使用一个命令同时迁移 workspace 和所有 Run 数据库：
+
+```sh
+cloverboard migrate --logdir ./runs
+cloverboard migrate --logdir ./runs --apply
+```
+
+第一条命令是 dry-run。`--apply` 会先把需要修改的数据库备份到
+`.cloverboard-backups/`，再按 Run 在前、workspace 在后的顺序升级。
+执行前请停止 `serve` 和正在写入的训练进程。
+
 ## 四片叶子，一块看板
 
 记录、对比、聚合、问答。

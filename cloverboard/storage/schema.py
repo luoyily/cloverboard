@@ -9,7 +9,9 @@ Images/audio index files; text bodies are stored directly in SQLite.
 
 import sqlite3
 
-SCHEMA_VERSION = 7
+from cloverboard.migrations.versions import RUN_SCHEMA_VERSION
+
+SCHEMA_VERSION = RUN_SCHEMA_VERSION
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (

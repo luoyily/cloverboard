@@ -15,6 +15,7 @@ from cloverboard.server.models import (
     SavedView, SavedViewInput, ViewRename, WorkspaceSave, WorkspaceSnapshot,
     WorkspaceState, PaletteLibrary, PaletteInput, CustomPalette, WorkspaceConfig,
 )
+from cloverboard.migrations.versions import WORKSPACE_SCHEMA_VERSION
 from cloverboard.storage.paths import resolve_log_path
 
 router = APIRouter(prefix="/api/workspace", tags=["Workspace"])
@@ -41,6 +42,8 @@ class WorkspaceStore:
         self._memory = sqlite3.connect(":memory:", check_same_thread=False) if self._root is None else None
         if self._memory is not None:
             self._memory.executescript(_SCHEMA)
+            self._memory.execute(f"PRAGMA user_version = {WORKSPACE_SCHEMA_VERSION}")
+            self._memory.commit()
 
     @contextmanager
     def _connection(self, write: bool = False):
@@ -54,7 +57,8 @@ class WorkspaceStore:
                     path = resolve_log_path(self._root, ".workspace", "workspace.sqlite")
                     for suffix in ("-wal", "-shm", "-journal"):
                         resolve_log_path(self._root, ".workspace", "workspace.sqlite" + suffix)
-                    if not write and not path.is_file():
+                    exists = path.is_file()
+                    if not write and not exists:
                         yield None
                         return
                     if write:
@@ -62,8 +66,13 @@ class WorkspaceStore:
                         connection = sqlite3.connect(path, timeout=5)
                         connection.execute("PRAGMA journal_mode = WAL")
                         connection.executescript(_SCHEMA)
+                        if not exists:
+                            connection.execute(f"PRAGMA user_version = {WORKSPACE_SCHEMA_VERSION}")
+                            connection.commit()
                     else:
                         connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=5)
+                if connection is not None:
+                    self._check_schema_version(connection)
                 if write:
                     connection.execute("BEGIN IMMEDIATE")
                 yield connection
@@ -84,6 +93,12 @@ class WorkspaceStore:
     def _require_writable(self):
         if not self.writable:
             raise HTTPException(403, "Workspace is read-only")
+
+    @staticmethod
+    def _check_schema_version(connection):
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version > WORKSPACE_SCHEMA_VERSION:
+            raise HTTPException(503, "Workspace database is newer than this server")
 
     def palettes(self) -> list[CustomPalette]:
         with self._connection() as connection:

@@ -23,6 +23,8 @@ dist/
 /.temp_code/
 runs/
 .workspace/
+.cloverboard-backups/
+.cloverboard-migrate.lock
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm

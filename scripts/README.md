@@ -69,34 +69,22 @@ edits can coexist with importing.
 Generated data belongs in ignored `.local-data/`, outside `cloverboard/` and
 `web/`. It is independent of `.preview/default` and its reset operation.
 
-## One-off workspace migration (October 27 to October 28)
+## Database migrations
 
-Use the current checkout and its installed Python dependencies. Stop all servers
-using the log directory before applying this migration:
+Workspace and run databases are upgraded together through the CLI. Stop servers
+and training writers before applying a migration. The command is a dry run
+unless `--apply` is passed:
 
 ```sh
-python scripts/migrate_workspace_20261028.py ./runs
-python scripts/migrate_workspace_20261028.py ./runs --apply
+cloverboard migrate --logdir ./runs
+cloverboard migrate --logdir ./runs --apply
 ```
 
-The first command previews changes. The second backs up the original database
-beside it as `workspace.sqlite.bak-<timestamp>-<id>` using SQLite's backup API,
-then applies all changes in one transaction. Passing the full path to
-`.workspace/workspace.sqlite` also works. Repeating a completed migration is a
-no-op; an unknown schema or invalid setting stops the entire migration.
-
-Only the workspace database is changed. Custom palettes, current viewing
-settings, saved Views, baseline, targets and manual colors are retained. Manual
-colors become fixed colors; old automatically assigned colors are regenerated
-by the frontend under the new color model. Existing entries in the new color
-map and palette library take precedence over legacy entries with the same key
-or ID. Conflicting palette names stop the migration instead of overwriting.
-Per-View custom palette snapshots remain independent of the palette library.
-
-The script removes saved chart zoom (now temporary) and upgrades the earlier
-single-target format when present. Training `run.sqlite` files and browser
-localStorage are outside this migration. Keep the backup until you have checked
-the migrated workspace.
+Every database is inspected before anything is written. Databases that need
+work are backed up under `.cloverboard-backups/` by default, current run
+databases are left alone, and an existing workspace without a schema version is
+stamped to version 1 without rewriting its JSON payloads. A lock file prevents
+two migrations from running in the same log directory.
 
 ## Start the generated preview
 

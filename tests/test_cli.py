@@ -104,3 +104,48 @@ def test_share_prints_a_fresh_working_link_and_forces_read_only(monkeypatch, tmp
         assert client.get("/api/workspace", headers=headers).json()["writable"] is False
         assert client.post("/api/workspace/views", headers=headers, json={"name": "x", "state": {}}).status_code == 403
     assert applications[0].state.access_token != applications[1].state.access_token
+
+
+def test_migrate_defaults():
+    args = build_parser().parse_args(["migrate"])
+
+    assert args.logdir == "./runs"
+    assert args.apply is False
+    assert args.backup is None
+
+
+def test_migrate_command_is_a_dry_run_by_default_then_applies(tmp_path, capsys):
+    import json
+    import sqlite3
+
+    from cloverboard.cli import main
+    from cloverboard.server.workspace import _SCHEMA
+
+    path = tmp_path / ".workspace" / "workspace.sqlite"
+    path.parent.mkdir()
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(_SCHEMA)
+        connection.execute(
+            "INSERT INTO workspace_state VALUES (1, ?)",
+            (json.dumps({"state": {"version": 1, "search": "legacy"}, "saved_at": 1}),),
+        )
+        connection.execute("INSERT INTO palette_library VALUES (1, ?)", (json.dumps({"palettes": []}),))
+        connection.commit()
+    finally:
+        connection.close()
+
+    main(["migrate", "--logdir", str(tmp_path)])
+    output = capsys.readouterr().out
+    assert "workspace: schema 0 -> 1" in output
+    assert "Dry run: no changes written" in output
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
+
+    main(["migrate", "--logdir", str(tmp_path), "--apply"])
+    output = capsys.readouterr().out
+    assert "Backups:" in output
+    assert "Migrated 1 database(s)." in output
+    assert "already current" not in output
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1

@@ -62,6 +62,20 @@ cloverboard serve --logdir ./runs
 Open [http://127.0.0.1:7230](http://127.0.0.1:7230). The WebUI and MCP endpoint
 start in the same process.
 
+## Upgrading existing data
+
+After installing a newer release, migrate all workspace and run databases
+together:
+
+```sh
+cloverboard migrate --logdir ./runs
+cloverboard migrate --logdir ./runs --apply
+```
+
+The first command is a dry run. `--apply` backs up changed databases under
+`.cloverboard-backups/` and upgrades runs before the workspace. Stop `serve`
+and any training writers first.
+
 ## Four leaves, one board
 
 Record, compare, aggregate, ask.
