@@ -36,7 +36,7 @@ export default function ChartGrid({ metrics, loadingMetrics, dataTick, runs, ser
     return [...grouped].sort(([a], [b]) => a.localeCompare(b));
   }, [metrics]);
   if (!metrics.length) return <div className="empty">{state.metric_filter ? "No metrics match this filter." : "No metrics in the selected runs."}</div>;
-  return <div className={`chart-grid chart-density-${state.chart_density}`}>
+  return <div className={`chart-grid chart-density-${state.chart_density} chart-layout-${state.chart_layout} chart-card-style-${state.chart_card_style}`}>
     {groups.map(([group, fields]) => {
       const collapsed = state.collapsed_groups.includes(group);
       const Icon = collapsed ? CaretRightIcon : CaretDownIcon;

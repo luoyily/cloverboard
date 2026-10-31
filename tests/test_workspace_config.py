@@ -88,7 +88,7 @@ def test_toolbar_watching_settings_restore_together_in_state_and_named_view(tmp_
         "selected_ids": ["baseline", "trial"], "baseline_id": "baseline", "search": "trial", "search_regex": True,
         "colors": {"runs": {"trial": {"color": "#abcdef", "fixed": True}}, "top_k": {"enabled": True, "metric": "score", "direction": "max", "readout": "best", "k": 2}},
         "targets": {"score": {"items": [{"id": "goal", "name": "Goal", "chart_label": "G", "value": .9, "direction": "gte"}], "active_id": "goal"}},
-        "metric_filter": "loss", "chart_density": "compact", "show_chart_legend": False, "smoothing": .2,
+        "metric_filter": "loss", "chart_density": "compact", "chart_layout": "fill", "chart_card_style": "transparent", "show_chart_legend": False, "smoothing": .2,
         "y_scale": "log", "y_warmup": 100, "chart_scales": {"score": "linear"}, "chart_warmup": {"score": None},
         "tooltip_decimals": 6, "tooltip_sort": "list", "tooltip_placement": "horizontal", "tooltip_time": "wall", "tooltip_delta": "hidden",
         "metric_columns": ["score"], "hidden_params": ["seed"], "differences_only": False, "sort_column": "metric:score", "sort_desc": True,

@@ -108,13 +108,13 @@ def test_reading_fresh_workspace_does_not_create_database(tmp_path):
     assert not (tmp_path / ".workspace").exists()
 
 
-def test_chart_legend_and_hover_placement_roundtrip_and_legacy_defaults(tmp_path):
+def test_chart_legend_layout_card_style_and_hover_placement_roundtrip_and_legacy_defaults(tmp_path):
     client = _client(tmp_path)
-    # Existing states and Views have neither field.
+    # Existing states and Views have none of these fields.
     assert _save(client, {}).status_code == 200
     legacy = client.post("/api/workspace/views", json={"name": "Legacy", "state": {}})
     assert legacy.status_code == 201
-    state = {"show_chart_legend": False, "tooltip_placement": "horizontal"}
+    state = {"show_chart_legend": False, "tooltip_placement": "horizontal", "chart_layout": "distribute", "chart_card_style": "transparent"}
     assert _save(client, state, 200).status_code == 200
     view = client.post("/api/workspace/views", json={"name": "Charts", "state": state})
     assert view.status_code == 201
@@ -123,8 +123,12 @@ def test_chart_legend_and_hover_placement_roundtrip_and_legacy_defaults(tmp_path
     for value in [snapshot["state"], saved_views["Charts"]]:
         assert value["show_chart_legend"] is False
         assert value["tooltip_placement"] == "horizontal"
+        assert value["chart_layout"] == "distribute"
+        assert value["chart_card_style"] == "transparent"
     assert saved_views["Legacy"]["show_chart_legend"] is True
     assert saved_views["Legacy"]["tooltip_placement"] == "vertical"
+    assert saved_views["Legacy"]["chart_layout"] == "left"
+    assert saved_views["Legacy"]["chart_card_style"] == "normal"
     assert _save(client, {"tooltip_placement": "other"}, 300).status_code == 422
 
 

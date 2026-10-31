@@ -286,24 +286,35 @@ test("readouts place content-sized and viewport-wide popups within the viewport"
   }
 });
 
-test("chart legend and hover placement settings support defaults and shared state", () => {
+test("chart legend, layout, card style and hover placement support defaults and shared state", () => {
   const defaults = normalizeState({});
   assert.equal(defaults.show_chart_legend, true);
   assert.equal(defaults.tooltip_placement, "vertical");
-  const invalid = normalizeState({ show_chart_legend: null, tooltip_placement: "other" });
+  assert.equal(defaults.chart_layout, "left");
+  assert.equal(defaults.chart_card_style, "normal");
+  const invalid = normalizeState({ show_chart_legend: null, tooltip_placement: "other", chart_layout: "grid", chart_card_style: "ghost" });
   assert.equal(invalid.show_chart_legend, true);
   assert.equal(invalid.tooltip_placement, "vertical");
-  const state = normalizeState({ show_chart_legend: false, tooltip_placement: "horizontal" });
+  assert.equal(invalid.chart_layout, "left");
+  assert.equal(invalid.chart_card_style, "normal");
+  for (const layout of ["left", "fill", "distribute"]) assert.equal(normalizeState({ chart_layout: layout }).chart_layout, layout);
+  const state = normalizeState({ show_chart_legend: false, tooltip_placement: "horizontal", chart_layout: "fill", chart_card_style: "transparent" });
   const restored = readSharedLocation(`http://localhost/#state=${encodeSharedState(state)}`).state;
   assert.equal(restored.show_chart_legend, false);
   assert.equal(restored.tooltip_placement, "horizontal");
+  assert.equal(restored.chart_layout, "fill");
+  assert.equal(restored.chart_card_style, "transparent");
   assert.notEqual(viewStateKey(state), viewStateKey(defaults));
   const old = { ...defaultWorkspaceState() };
   delete old.show_chart_legend;
   delete old.tooltip_placement;
+  delete old.chart_layout;
+  delete old.chart_card_style;
   const legacy = readSharedLocation(`http://localhost/#state=${Buffer.from(JSON.stringify({ version: 1, state: old })).toString("base64url")}`).state;
   assert.equal(legacy.show_chart_legend, true);
   assert.equal(legacy.tooltip_placement, "vertical");
+  assert.equal(legacy.chart_layout, "left");
+  assert.equal(legacy.chart_card_style, "normal");
 });
 
 test("fast media results publish before a slow peer finishes", async () => {

@@ -4,6 +4,9 @@ import { stableValue } from "./comparison";
 import type { ReadoutPlacement } from "./readout";
 import { normalizePalette } from "./palettes";
 
+export type ChartLayout = "left" | "fill" | "distribute";
+export type ChartCardStyle = "normal" | "transparent";
+
 // Saved viewing settings. Pointer/readout state, chart zoom and browser
 // preferences belong to the UI and must not enter Views, JSON or remote saves.
 export interface WorkspaceState {
@@ -14,6 +17,8 @@ export interface WorkspaceState {
   run_sort: "started_desc" | "started_asc" | "name_asc" | "name_desc";
   metric_filter: string;
   chart_density: "normal" | "compact";
+  chart_layout: ChartLayout;
+  chart_card_style: ChartCardStyle;
   show_chart_legend: boolean;
   table_time: "last_recorded_at" | "started_at" | "hidden";
   table_show_steps: boolean;
@@ -66,7 +71,7 @@ export function defaultWorkspaceState(): WorkspaceState {
   return {
     version: 1,
     selected_ids: null,
-    search: "", search_regex: false, run_sort: "started_desc", metric_filter: "", chart_density: "normal", table_time: "last_recorded_at",
+    search: "", search_regex: false, run_sort: "started_desc", metric_filter: "", chart_density: "normal", chart_layout: "left", chart_card_style: "normal", table_time: "last_recorded_at",
     tag_filter: [], tag_filter_match: "any",
     show_chart_legend: true,
     smoothing: 0.6,
@@ -122,6 +127,8 @@ export function normalizeState(state: Partial<WorkspaceState>): WorkspaceState {
   if (!["started_desc", "started_asc", "name_asc", "name_desc"].includes(next.run_sort)) next.run_sort = "started_desc";
   if (typeof next.metric_filter !== "string") next.metric_filter = "";
   if (!["normal", "compact"].includes(next.chart_density)) next.chart_density = "normal";
+  if (!["left", "fill", "distribute"].includes(next.chart_layout)) next.chart_layout = "left";
+  if (!["normal", "transparent"].includes(next.chart_card_style)) next.chart_card_style = "normal";
   if (typeof next.show_chart_legend !== "boolean") next.show_chart_legend = true;
   if (!["last_recorded_at", "started_at", "hidden"].includes(next.table_time)) next.table_time = "last_recorded_at";
   const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);

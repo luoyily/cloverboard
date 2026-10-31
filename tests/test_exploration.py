@@ -155,6 +155,7 @@ def test_view_list_and_comparison_preferences_roundtrip(tmp_path):
         "selected_ids": ["r1"], "baseline_id": "r1", "search": "SRx[24]", "search_regex": True, "run_sort": "name_desc",
         "targets": {"loss": _loss_targets()},
         "tooltip_time": "elapsed", "tooltip_delta": "both", "chart_warmup": {"loss": 10},
+        "chart_layout": "fill", "chart_card_style": "transparent",
         "colors": {"mode": "continuous", "field": "optimizer.lr", "domain": [0.0001, 0.1], "runs": {"r1": {"color": "#3276b8", "fixed": True}}},
     }
     saved = client.post("/api/workspace/views", json={"name": "Low LR", "state": state})
@@ -167,6 +168,8 @@ def test_view_list_and_comparison_preferences_roundtrip(tmp_path):
     assert restored["chart_warmup"] == {"loss": 10}
     assert restored["tooltip_time"] == "elapsed"
     assert restored["tooltip_delta"] == "both"
+    assert restored["chart_layout"] == "fill"
+    assert restored["chart_card_style"] == "transparent"
     defaults = client.post("/api/workspace/views", json={"name": "Defaults", "state": {"selected_ids": []}}).json()["state"]
     assert defaults["search_regex"] is False
     assert defaults["targets"] == {}
@@ -247,6 +250,7 @@ def test_invalid_named_targets_are_rejected(tmp_path, invalid):
     {"colors": {"domain": [1, 0]}}, {"colors": {"runs": {"r1": {"color": "red", "fixed": True}}}},
     {"colors": {"palette": "unknown"}},
     {"tooltip_time": "wrong"}, {"tooltip_delta": "wrong"}, {"chart_warmup": {"loss": 1 << 60}},
+    {"chart_layout": "grid"}, {"chart_card_style": "ghost"},
 ])
 def test_invalid_exploration_state_is_rejected(tmp_path, patch):
     response = TestClient(create_app(logdir=tmp_path), base_url="http://127.0.0.1").put("/api/workspace/state", json={"state": patch, "saved_at": 10})

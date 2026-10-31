@@ -99,6 +99,8 @@ export default function TopBar({
           metrics={metrics} topK={state.colors.top_k} onTopKChange={(top_k) => onChange({ colors: { ...state.colors, top_k } })}
           metricFilter={state.metric_filter} onMetricFilterChange={(metric_filter) => onChange({ metric_filter })}
           density={state.chart_density} onDensityChange={(chart_density) => onChange({ chart_density })}
+          layout={state.chart_layout} onLayoutChange={(chart_layout) => onChange({ chart_layout })}
+          cardStyle={state.chart_card_style} onCardStyleChange={(chart_card_style) => onChange({ chart_card_style })}
           showLegend={state.show_chart_legend} onShowLegendChange={(show_chart_legend) => onChange({ show_chart_legend })}
           yScale={state.y_scale} onYScaleChange={(y_scale) => onChange({ y_scale })}
           warmup={state.y_warmup} onWarmupChange={(y_warmup) => onChange({ y_warmup })}
