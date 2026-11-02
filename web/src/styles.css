@@ -754,8 +754,12 @@ select.text-input option, select.text-input optgroup { background: var(--surface
 .compare-table thead th { position: sticky; z-index: 2; top: 0; height: var(--table-header-height); background: var(--sidebar); font-weight: 400; }
 .compare-table tbody th, .compare-table td { height: 42px; font-weight: 400; }
 .compare-table tbody tr:last-child > * { border-bottom: 0; }
-.compare-table .identity-column { position: sticky; z-index: 1; left: 0; width: 230px; min-width: 230px; max-width: 230px; border-right: 1px solid var(--border); background: var(--surface); }
+.compare-table .identity-column { position: sticky; z-index: 1; left: 0; width: var(--run-column-width, auto); min-width: var(--run-column-width, 160px); max-width: var(--run-column-width, none); border-right: 1px solid var(--border); background: var(--surface); }
 .compare-table thead .identity-column { z-index: 3; background: var(--sidebar); }
+.identity-resize { position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; z-index: 8; cursor: col-resize; touch-action: none; }
+.identity-resize:hover, .identity-resize:active { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+body.column-resizing, body.column-resizing * { cursor: col-resize !important; }
+body.column-resizing { user-select: none; }
 .compare-table th:has(.popover-menu[open]) { z-index: 5; }
 .column-sort { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 0; border: 0; background: transparent; color: var(--text-muted); text-align: left; cursor: pointer; }
 .column-sort:hover { color: var(--text); }
@@ -844,7 +848,7 @@ select.text-input option, select.text-input optgroup { background: var(--surface
   .popover-menu .menu-popover { max-height: max(160px, calc(100dvh - 320px)); overflow-y: auto; scrollbar-width: thin; }
   .column-options { max-height: none; overflow: visible; }
   .popover-trigger { max-width: 160px; }
-  .compare-table .identity-column { min-width: 160px; max-width: 160px; width: 160px; }
+  .identity-resize { display: none; }
   .comparison-scroll { max-height: calc(100dvh - 350px); }
   .content {
     padding: 10px 12px 20px;

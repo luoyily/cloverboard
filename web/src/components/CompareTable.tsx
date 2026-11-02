@@ -1,5 +1,5 @@
 import { ArrowDownIcon, ArrowUpIcon, TargetIcon } from "@phosphor-icons/react";
-import type { CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { seriesKey, type RunSummary, type ScalarSummary } from "../api";
 import { displayParameter, formatMetric as formatRecordedMetric, runLabel, stableValue, type ParameterColumn } from "../comparison";
 import type { WorkspaceState } from "../workspace";
@@ -8,6 +8,21 @@ import { activeTarget } from "../targets";
 import { TargetCell } from "./TargetsMenu";
 import { formatTableTime, formatWallTime } from "../readout";
 import RunActions from "./RunActions";
+
+const RUN_WIDTH_KEY = "cloverboard:table-run-width";
+const RUN_WIDTH_MIN = 160;
+const RUN_WIDTH_RESERVE = 140;
+
+function clampRunWidth(value: number, containerWidth: number): number {
+  return Math.round(Math.max(RUN_WIDTH_MIN, Math.min(value, Math.max(RUN_WIDTH_MIN, containerWidth - RUN_WIDTH_RESERVE))));
+}
+
+function readRunWidth(): number | null {
+  try {
+    const value = Number(localStorage.getItem(RUN_WIDTH_KEY));
+    return Number.isFinite(value) && value >= RUN_WIDTH_MIN ? Math.round(value) : null;
+  } catch { return null; }
+}
 
 interface CompareTableProps {
   runs: RunSummary[];
@@ -29,6 +44,17 @@ interface CompareTableProps {
 
 export default function CompareTable({ runs, configs, params, metrics, summaries, colors, state, loading, onChange, focusedId, onFocusRun, onAppearance, onDetails, onBaseline, onEditTags }: CompareTableProps) {
   const formatMetric = (value: number | null | undefined) => formatRecordedMetric(value, state.table_decimals);
+  const sectionRef = useRef<HTMLElement>(null);
+  const drag = useRef<{ pointerId: number; startX: number; startWidth: number; nextWidth: number } | null>(null);
+  const [runWidth, setRunWidth] = useState<number | null>(readRunWidth);
+  useEffect(() => {
+    try {
+      if (runWidth === null) localStorage.removeItem(RUN_WIDTH_KEY);
+      else localStorage.setItem(RUN_WIDTH_KEY, String(runWidth));
+    } catch { /* Optional browser preference. */ }
+  }, [runWidth]);
+  useLayoutEffect(() => { applyRunWidth(runWidth); }, [runWidth]);
+  useEffect(() => () => document.body.classList.remove("column-resizing"), []);
   const visibleParams = params.filter((param) => !state.hidden_params.includes(param.key) &&
     (!state.differences_only || param.different || runs.length < 2));
   const timeKey = state.table_time === "hidden" ? null : state.table_time;
@@ -57,6 +83,55 @@ export default function CompareTable({ runs, configs, params, metrics, summaries
     return state.sort_desc ? -difference : difference;
   });
 
+  function applyRunWidth(width: number | null) {
+    const style = sectionRef.current?.style;
+    if (!style) return;
+    if (width === null) style.removeProperty("--run-column-width");
+    else style.setProperty("--run-column-width", `${width}px`);
+  }
+
+  function startResize(event: ReactPointerEvent<HTMLElement>) {
+    if (event.button !== 0) return;
+    const header = event.currentTarget.closest("th");
+    if (!header) return;
+    event.preventDefault();
+    const startWidth = header.getBoundingClientRect().width;
+    drag.current = { pointerId: event.pointerId, startX: event.clientX, startWidth, nextWidth: startWidth };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    document.body.classList.add("column-resizing");
+  }
+
+  function moveResize(event: ReactPointerEvent<HTMLElement>) {
+    const current = drag.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    const container = sectionRef.current?.querySelector<HTMLElement>(".comparison-scroll");
+    current.nextWidth = clampRunWidth(current.startWidth + event.clientX - current.startX, container?.clientWidth ?? window.innerWidth);
+    applyRunWidth(current.nextWidth);
+  }
+
+  function finishResize(event: ReactPointerEvent<HTMLElement>) {
+    const current = drag.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if (event.type === "pointerup") {
+      const container = sectionRef.current?.querySelector<HTMLElement>(".comparison-scroll");
+      current.nextWidth = clampRunWidth(current.startWidth + event.clientX - current.startX, container?.clientWidth ?? window.innerWidth);
+    }
+    drag.current = null;
+    document.body.classList.remove("column-resizing");
+    if (Math.round(current.nextWidth) !== Math.round(current.startWidth)) {
+      applyRunWidth(current.nextWidth);
+      setRunWidth(current.nextWidth);
+    } else {
+      applyRunWidth(runWidth);
+    }
+  }
+
+  function resetResize(event: ReactMouseEvent<HTMLElement>) {
+    event.preventDefault();
+    applyRunWidth(null);
+    setRunWidth(null);
+  }
+
   function heading(key: string, label: string) {
     const sorted = sortColumn === key;
     return <th key={key} scope="col" className={key === "run" ? "identity-column" : ""} aria-sort={sorted ? (state.sort_desc ? "descending" : "ascending") : "none"}>
@@ -64,10 +139,12 @@ export default function CompareTable({ runs, configs, params, metrics, summaries
         <span className="column-title">{label}</span>
         {sorted && <SortIcon size={12} aria-hidden="true" />}
       </button></div>
+      {key === "run" && <span className="identity-resize" role="separator" aria-orientation="vertical" aria-label="Resize experiment column" title="Drag to resize. Double-click to reset."
+        onPointerDown={startResize} onPointerMove={moveResize} onPointerUp={finishResize} onPointerCancel={finishResize} onLostPointerCapture={finishResize} onDoubleClick={resetResize} />}
     </th>;
   }
 
-  return <section className="comparison" aria-label="Run comparison" aria-busy={loading} style={{ "--target-row-height": hasTargetRow ? "48px" : "0px" } as CSSProperties}>
+  return <section ref={sectionRef} className="comparison" aria-label="Run comparison" aria-busy={loading} style={{ "--target-row-height": hasTargetRow ? "48px" : "0px" } as CSSProperties}>
     <div className="comparison-scroll" tabIndex={0} role="region" aria-label="Comparison table, scroll to see more columns">
       <table className="compare-table">
         <caption className="sr-only">Selected experiments, latest raw metric values, and hyperparameters.</caption>
