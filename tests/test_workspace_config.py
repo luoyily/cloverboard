@@ -15,6 +15,7 @@ def configuration():
         "state": {"selected_ids": ["a"], "colors": colors, "tooltip_decimals": 6, "y_scale": "log", "refresh_interval": 30},
         "views": [{"view_id": "a" * 32, "name": "Imported", "state": {"colors": colors, "table_decimals": 2}}],
         "palettes": [{"id": "custom:" + "b" * 32, "name": "Ocean", "colors": ["#abcdef", "#3276b8"]}],
+        "target_library": {"targets": {"score": {"items": [{"id": "goal", "name": "Goal", "chart_label": "G", "value": .9, "direction": "gte"}], "active_id": "goal"}}},
     }
 
 
@@ -33,9 +34,32 @@ def test_configuration_import_commits_current_state_and_independent_libraries(tm
     assert snapshot["views"][0]["state"]["colors"]["runs"] == payload["state"]["colors"]["runs"]
     assert snapshot["views"][0]["state"]["table_decimals"] == 2
     assert restarted.get("/api/workspace/palettes").json() == payload["palettes"]
-    # A View restore changes watching settings without replacing the library.
+    assert snapshot["target_library"]["targets"] == payload["target_library"]["targets"]
+    # A View restore changes watching settings without replacing either library.
     assert restarted.put("/api/workspace/state", json={"state": snapshot["views"][0]["state"], "saved_at": 20}).status_code == 200
     assert restarted.get("/api/workspace/palettes").json() == payload["palettes"]
+    assert restarted.get("/api/workspace").json()["target_library"]["targets"] == payload["target_library"]["targets"]
+
+
+def test_targets_form_a_workspace_library_saved_independently_of_viewing_state(tmp_path):
+    client = client_for(tmp_path)
+    goal = {"id": "goal", "name": "Goal", "chart_label": "G", "value": .9, "direction": "gte"}
+    library = {"targets": {"score": {"items": [goal], "active_id": "goal"}}}
+    assert client.put("/api/workspace/targets", json={**library, "saved_at": 10}).status_code == 200
+    # Older writes never regress the stored library.
+    stale = {"targets": {}, "saved_at": 9}
+    assert client.put("/api/workspace/targets", json=stale).json()["targets"] == library["targets"]
+    snapshot = client_for(tmp_path).get("/api/workspace").json()
+    assert snapshot["target_library"]["targets"] == library["targets"]
+    # Saving state or Views never embeds or replaces the target library.
+    state = {"version": 1, "smoothing": .2}
+    assert client.put("/api/workspace/state", json={"state": state, "saved_at": 30}).status_code == 200
+    assert client.post("/api/workspace/views", json={"name": "Charts", "state": state}).status_code == 201
+    snapshot = client_for(tmp_path).get("/api/workspace").json()
+    assert snapshot["target_library"]["targets"] == library["targets"]
+    assert snapshot["state"]["targets"] == {}  # The deprecated field stays empty; targets live in the library.
+    newer = client.put("/api/workspace/targets", json={"targets": {}, "saved_at": 40}).json()
+    assert newer["targets"] == {} and newer["saved_at"] == 40
 
 
 @pytest.mark.parametrize("invalid", [
@@ -87,7 +111,6 @@ def test_toolbar_watching_settings_restore_together_in_state_and_named_view(tmp_
     state = {
         "selected_ids": ["baseline", "trial"], "baseline_id": "baseline", "search": "trial", "search_regex": True,
         "colors": {"runs": {"trial": {"color": "#abcdef", "fixed": True}}, "top_k": {"enabled": True, "metric": "score", "direction": "max", "readout": "best", "k": 2}},
-        "targets": {"score": {"items": [{"id": "goal", "name": "Goal", "chart_label": "G", "value": .9, "direction": "gte"}], "active_id": "goal"}},
         "metric_filter": "loss", "chart_density": "compact", "chart_layout": "fill", "chart_card_style": "transparent", "show_chart_legend": False, "chart_legend_layout": "single", "chart_legend_trim_prefix": True, "smoothing": .2,
         "y_scale": "log", "y_warmup": 100, "chart_scales": {"score": "linear"}, "chart_warmup": {"score": None},
         "tooltip_decimals": 6, "tooltip_sort": "list", "tooltip_placement": "horizontal", "tooltip_time": "wall", "tooltip_delta": "hidden",

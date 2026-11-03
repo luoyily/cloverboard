@@ -89,16 +89,17 @@ cloverboard migrate --logdir ./runs --apply
   支持重新分配所选实验的颜色、按超参数分族着色和自定义调色板。
   固定某个 Run 的颜色后，重新分配、切换调色板或配色模式都不会改变它。
 - **Targets、Baseline 和光标处的差值。** 为整块看板选择一个 Baseline Run，
-  再为各指标设置命名 Target。沿图表 Step 移动即可查看 `Δ Base` / `Δ Target`，
+  再为各指标设置命名 Target。Targets 属于整个工作区，所有 View 共用同一份目标库。
+  沿图表 Step 移动即可查看 `Δ Base` / `Δ Target`，
   Table 使用相同的对比参照。**Chart settings → Top K** 仅在 Charts 中强调领先曲线。
-- **View 恢复完整的对比方式。** 实验勾选、筛选、排序、Baseline、Targets、
+- **View 恢复完整的对比方式。** 实验勾选、筛选、排序、Baseline、
   配色和 Chart/Table/Media 设置都可以保存为命名 View。
   缩放、光标位置、固定读数和播放进度属于临时交互；主题与侧栏宽度是浏览器偏好。
 
 当前观看配置会自动保存到 **Settings** 中选择的位置：**Remote workspace**（远程）
 或 **Local · this browser**（本地）。普通访问默认远程，只读与 share 访问保存到本地；
-View 和调色板统一使用当前保存位置。总设置也提供当前配置、View 和调色板的 JSON
-导入导出，本地模式还可通过 **Restore remote settings** 恢复远程观看配置。
+View、调色板和 Targets 统一使用当前保存位置。总设置也提供当前配置、View、调色板和
+Targets 的 JSON 导入导出，本地模式还可通过 **Restore remote settings** 恢复远程观看配置。
 
 ## 聚合与分享
 

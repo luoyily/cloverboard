@@ -1,5 +1,6 @@
 import { stableValue } from "./comparison";
 import { normalizePalette, paletteError, type CustomPalette, type PaletteInput } from "./palettes";
+import { normalizeTargets, type MetricTargets, type TargetLibrary } from "./targets";
 import { defaultWorkspaceState, normalizeState, type SavedView, type WorkspaceState } from "./workspace";
 
 export const MAX_CONFIG_BYTES = 2 * 1024 * 1024;
@@ -11,6 +12,7 @@ export interface ViewingConfig {
   state: WorkspaceState;
   views: SavedView[];
   palettes: CustomPalette[];
+  targets: TargetLibrary;
 }
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -18,15 +20,29 @@ export const localConfigKey = (workspaceId: string) => `cloverboard:local:${work
 export const newViewId = () => crypto.randomUUID().replaceAll("-", "");
 export const newPaletteId = () => `custom:${crypto.randomUUID().replaceAll("-", "")}`;
 
-export function initialConfig(state: WorkspaceState | null, views: SavedView[] = [], palettes: CustomPalette[] = []): ViewingConfig {
-  return { version: 1, state: normalizeState(state ?? defaultWorkspaceState()), views: views.map(view => ({ ...view, state: normalizeState(view.state) })), palettes };
+export function initialConfig(state: WorkspaceState | null, views: SavedView[] = [], palettes: CustomPalette[] = [], targets: TargetLibrary = {}): ViewingConfig {
+  return { version: 1, state: normalizeState(state ?? defaultWorkspaceState()), views: views.map(view => ({ ...view, state: normalizeState(view.state) })), palettes, targets: normalizeTargets(targets) };
+}
+
+// Targets moved from each View's state to the workspace-level library; configs
+// saved before the move are upgraded on read by hoisting every legacy copy.
+function legacyTargets(sources: unknown[]): TargetLibrary {
+  const merged: Record<string, MetricTargets> = {};
+  for (const source of sources) {
+    if (!record(source) || !record(source.targets)) continue;
+    for (const [metric, group] of Object.entries(source.targets)) {
+      if (record(group)) merged[metric] = group as unknown as MetricTargets;
+    }
+  }
+  return normalizeTargets(merged);
 }
 
 function parseState(value: unknown): WorkspaceState {
   if (!record(value) || value.version !== 1) throw new Error("Invalid viewing settings.");
+  const { targets: legacyTargetsField, ...rest } = value;
   try {
-    const normalized = normalizeState(value);
-    if (stableValue(normalized) !== stableValue(value)) throw new Error();
+    const normalized = normalizeState(rest);
+    if (stableValue(normalized) !== stableValue(rest)) throw new Error();
     return normalized;
   } catch { throw new Error("Invalid viewing settings."); }
 }
@@ -47,7 +63,10 @@ export function parseConfig(value: unknown): ViewingConfig {
   for (const items of [views.map(item => [item.view_id, item.name]), palettes.map(item => [item.id, item.name])]) {
     if (new Set(items.map(item => item[0])).size !== items.length || new Set(items.map(item => item[1].toLowerCase())).size !== items.length) throw new Error("Duplicate IDs or names in viewing configuration.");
   }
-  return { version: 1, state: parseState(value.state), views, palettes };
+  const targets = record(value.targets)
+    ? normalizeTargets(value.targets as Record<string, MetricTargets>)
+    : legacyTargets([...value.views.map(item => record(item) ? item.state : null), value.state]);
+  return { version: 1, state: parseState(value.state), views, palettes, targets };
 }
 
 export function readLocalConfig(storage: Pick<Storage, "getItem">, key: string): ViewingConfig | null {
@@ -101,13 +120,15 @@ export function mergeConfig(current: ViewingConfig, incoming: ViewingConfig): Vi
     return { ...next, active_view_id: state.active_view_id ? viewIds.get(state.active_view_id) ?? null : null };
   }
   const views = incoming.views.map(item => ({ view_id: viewIds.get(item.view_id)!, name: copyName(item.name, viewNames, 80), state: { ...remap(item.state), active_view_id: null } }));
-  return { ...current, state: remap(incoming.state), views: [...current.views, ...views], palettes: [...current.palettes, ...palettes] };
+  // Metric names are semantic, so imported groups override local ones per metric.
+  const targets = { ...current.targets, ...incoming.targets };
+  return { ...current, state: remap(incoming.state), views: [...current.views, ...views], palettes: [...current.palettes, ...palettes], targets };
 }
 
-export function restoreRemoteConfig(current: ViewingConfig, state: WorkspaceState | null): ViewingConfig {
+export function restoreRemoteConfig(current: ViewingConfig, state: WorkspaceState | null, targets?: TargetLibrary): ViewingConfig {
   const restored = normalizeState(state ?? defaultWorkspaceState());
   if (!current.views.some(view => view.view_id === restored.active_view_id)) restored.active_view_id = null;
-  return { ...current, state: restored };
+  return { ...current, state: restored, targets: targets === undefined ? current.targets : normalizeTargets(targets) };
 }
 
 export function saveLocalView(config: ViewingConfig, name: string, viewId?: string): ViewingConfig {

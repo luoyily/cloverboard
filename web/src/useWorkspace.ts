@@ -19,10 +19,10 @@ export function useWorkspace() {
   }, [session, loadTick]);
   const config = session.getConfig();
   return {
-    ...snapshot, config, views: config.views, palettes: config.palettes, sharedViews: remote?.workspace.views ?? [], setMode: session.setMode,
+    ...snapshot, config, views: config.views, palettes: config.palettes, targets: snapshot.targets, sharedViews: remote?.workspace.views ?? [], setMode: session.setMode,
     writable: remote?.workspace.writable ?? false, workspaceId: remote?.workspace.workspace_id ?? "",
-    remoteError: snapshot.stateError,
-    update: session.update, openView: session.openView,
+    remoteError: snapshot.stateError, targetsError: snapshot.targetsError,
+    update: session.update, openView: session.openView, saveTargets: session.saveTargets,
     saveView: session.saveView, renameView: session.renameView, deleteView: session.deleteView,
     savePalette: session.savePalette, deletePalette: session.deletePalette,
     importConfig: session.importConfig, restoreRemote: session.restoreRemote,

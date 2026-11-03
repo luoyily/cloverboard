@@ -94,12 +94,13 @@ Record, compare, aggregate, ask.
   family, or use a custom palette. Fix a run's color to preserve it through
   reassignment, palette changes and color-mode changes.
 - **Targets, a baseline and deltas at the cursor.** Choose one baseline run
-  for the board and set named targets for each metric. Inspect
+  for the board and set named targets for each metric. Targets belong to the
+  workspace, so every View shares the same target library. Inspect
   `Δ Base` / `Δ Target` while moving through chart steps, and compare the same
   references in Table. **Chart settings → Top K** emphasizes leading curves
   in Charts only.
 - **Views that restore how you compare.** Save run selection, filters,
-  sorting, the baseline, targets, colors and Chart/Table/Media settings as a
+  sorting, the baseline, colors and Chart/Table/Media settings as a
   named View. Zoom, pointer position, pinned readouts and playback position
   remain temporary; theme and sidebar width are browser preferences.
 

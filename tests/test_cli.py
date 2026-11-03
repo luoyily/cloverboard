@@ -137,7 +137,7 @@ def test_migrate_command_is_a_dry_run_by_default_then_applies(tmp_path, capsys):
 
     main(["migrate", "--logdir", str(tmp_path)])
     output = capsys.readouterr().out
-    assert "workspace: schema 0 -> 1" in output
+    assert "workspace: schema 0 -> 2" in output
     assert "Dry run: no changes written" in output
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
@@ -148,4 +148,4 @@ def test_migrate_command_is_a_dry_run_by_default_then_applies(tmp_path, capsys):
     assert "Migrated 1 database(s)." in output
     assert "already current" not in output
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2

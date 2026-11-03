@@ -1,5 +1,4 @@
 import { defaultColors, type ColorSettings, type TimeDisplay, type DeltaDisplay } from "./features";
-import { normalizeTargets, type MetricTargets } from "./targets";
 import { stableValue } from "./comparison";
 import type { ReadoutPlacement } from "./readout";
 import { normalizePalette } from "./palettes";
@@ -61,7 +60,6 @@ export interface WorkspaceState {
   sort_desc: boolean;
   active_view_id: string | null;
   baseline_id: string | null;
-  targets: Record<string, MetricTargets>;
   colors: ColorSettings;
 }
 
@@ -97,7 +95,7 @@ export function defaultWorkspaceState(): WorkspaceState {
     sort_column: "run",
     sort_desc: false,
     active_view_id: null,
-    baseline_id: null, targets: {}, colors: defaultColors(),
+    baseline_id: null, colors: defaultColors(),
   };
 }
 
@@ -161,7 +159,6 @@ export function normalizeState(state: Partial<WorkspaceState>): WorkspaceState {
   if (!["charts", "table", "images"].includes(next.panel)) next.panel = "charts";
   if (typeof next.image_name !== "string") next.image_name = "";
   if (!Number.isSafeInteger(next.image_step)) next.image_step = null;
-  next.targets = normalizeTargets(Object.fromEntries(entries(state.targets)));
   next.baseline_id = typeof state.baseline_id === "string" ? state.baseline_id : null;
   if (!["linear", "log"].includes(next.y_scale)) next.y_scale = "linear";
   next.chart_scales = Object.fromEntries(entries(state.chart_scales).filter(([, value]) => ["linear", "log"].includes(value)));

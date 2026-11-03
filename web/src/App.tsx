@@ -27,6 +27,7 @@ const EMPTY_SUMMARIES = new Map<string, ScalarSummary>();
 export default function App() {
   const workspace = useWorkspace();
   const { state, update, ready } = workspace;
+  const targets = workspace.targets;
   const [runCatalog, setRunCatalog] = useState<RunCatalog | null>(null);
   const [localRuns, setLocalRuns] = useState<RunSummary[]>([]);
   const runs = runCatalog?.runs ?? localRuns;
@@ -87,10 +88,10 @@ export default function App() {
   const seriesRequests = selectedRuns.flatMap((run) => (catalogs.get(run.run_id)?.fields ?? []).filter((field) => !state.collapsed_groups.includes(field.group) && visibleMetricNames.has(field.metric)).map(({ metric }) => ({ runId: run.run_id, metric, stamp: run.last_recorded_at })));
   const { series, loadingMetrics, error: seriesError } = useScalarSeries(selectedRuns.map((run) => run.run_id), seriesRequests, state.smoothing, dataTick, ready && needsSeries);
   const chosenMetrics = useMemo(() => (state.metric_columns ?? defaultMetricColumns(metrics)).filter((name) => metrics.includes(name)), [state.metric_columns, metrics]);
-  const summaryMetrics = state.panel === "table" ? [...chosenMetrics] : state.panel === "charts" ? metrics.filter((metric) => activeTarget(state.targets[metric])) : [];
+  const summaryMetrics = state.panel === "table" ? [...chosenMetrics] : state.panel === "charts" ? metrics.filter((metric) => activeTarget(targets[metric])) : [];
   if (topKEnabled && state.colors.top_k.metric && !summaryMetrics.includes(state.colors.top_k.metric)) summaryMetrics.push(state.colors.top_k.metric);
   const summaryTargets = summaryMetrics.map((metric) => {
-    const target = activeTarget(state.targets[metric]);
+    const target = activeTarget(targets[metric]);
     return target ? [target.value, target.direction] : null;
   });
   const summaryKey = JSON.stringify([selectionKey, summaryMetrics, summaryTargets, dataTick, recordedVersion]);
@@ -182,7 +183,7 @@ export default function App() {
     const controller = new AbortController();
     const requests = selectedRuns.flatMap((run) => summaryMetrics.map((metric) => ({ run, metric })));
     void pooledResults(requests, async ({ run, metric }) => {
-      const target = activeTarget(state.targets[metric]);
+      const target = activeTarget(targets[metric]);
       const cacheKey = JSON.stringify([run.run_id, metric, target?.value, target?.direction, dataTick, run.last_recorded_at]);
       const summary = await summaryCache.current.load(cacheKey, () => fetchSummary(run.run_id, metric, target));
       return [seriesKey(run.run_id, metric), summary] as const;
@@ -256,12 +257,12 @@ export default function App() {
   } else if (state.panel === "images") {
     content = <MediaPanel key={`${workspace.contextVersion}:${state.media_type}`} workspaceId={workspace.workspaceId} runs={selectedRuns} state={state} colors={colors} refreshTick={pollTick + dataTick} onChange={update} />;
   } else if (state.panel === "table") {
-    content = <CompareTable runs={selectedRuns} configs={configs} params={params} metrics={chosenMetrics} summaries={visibleSummaries} colors={colors} state={displayState}
+    content = <CompareTable runs={selectedRuns} configs={configs} params={params} metrics={chosenMetrics} summaries={visibleSummaries} colors={colors} state={displayState} targets={targets} onSaveTargets={workspace.saveTargets}
       loading={(!metrics.length && !catalogReady) || loadedSummary !== summaryKey} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onAppearance={setAppearance} onDetails={openDetails} onBaseline={setBaseline} onEditTags={setTagRuns} />;
   } else if (!metricFields.length && !catalogReady) {
     content = <div className="empty" role="status">Loading metrics…</div>;
   } else {
-    content = <ChartGrid key={workspace.contextVersion} metrics={filteredMetricFields} loadingMetrics={loadingMetrics} dataTick={dataTick} runs={selectedRuns} series={series} colors={colors} smoothing={state.smoothing} state={displayState} summaries={visibleSummaries} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onLocateRun={locateRun} topIds={topIds} />;
+    content = <ChartGrid key={workspace.contextVersion} metrics={filteredMetricFields} loadingMetrics={loadingMetrics} dataTick={dataTick} runs={selectedRuns} series={series} colors={colors} smoothing={state.smoothing} state={displayState} targets={targets} summaries={visibleSummaries} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onLocateRun={locateRun} topIds={topIds} />;
   }
 
   return <div className="app" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
@@ -272,13 +273,14 @@ export default function App() {
       <TopBar themeMode={themeMode} onThemeToggle={() => setThemeMode((mode) => nextThemeMode(mode))}
         onRefresh={() => { setDataTick((tick) => tick + 1); if (workspace.loadError) workspace.retry(); }}
         state={state} views={workspace.views} sharedViews={workspace.sharedViews} writable={workspace.writable} ready={ready} storageError={workspace.storageError} config={workspace.config} mode={workspace.mode} onMode={workspace.setMode} onImportConfig={workspace.importConfig} onRestoreRemote={workspace.restoreRemote}
-        onChange={update} onOpenView={workspace.openView} onSaveView={workspace.saveView} onDeleteView={workspace.deleteView} onRenameView={workspace.renameView}
+        onChange={update} targets={targets} onSaveTargets={workspace.saveTargets} onOpenView={workspace.openView} onSaveView={workspace.saveView} onDeleteView={workspace.deleteView} onRenameView={workspace.renameView}
         metrics={metrics}
         colorControls={<ColorMenu key={workspace.contextVersion} runs={runs} selectedIds={selectedIds} settings={state.colors} theme={resolvedTheme} palettes={workspace.palettes} ready={ready} onSavePalette={workspace.savePalette} onDeletePalette={workspace.deletePalette} onChange={(colors) => update({ colors })} />}
         compareControls={<CompareControls state={state} metrics={metrics} chosenMetrics={chosenMetrics} params={params} onChange={update} />} />
       <main className="content" id="workspace-panel" role="tabpanel" aria-labelledby={`${state.panel}-tab`} tabIndex={0}>
         {workspace.storageError && <p className="workspace-notice" role="alert">{workspace.storageError}<button className="text-button" onClick={workspace.retryStorage}>Retry saving</button></p>}
         {workspace.remoteError && <p className="workspace-notice" role="alert">{workspace.remoteError}<button className="text-button" onClick={() => void workspace.retryRemote()}>Retry remote saving</button></p>}
+        {workspace.targetsError && <p className="workspace-notice" role="alert">{workspace.targetsError}</p>}
         {workspace.linkNotice && <p className="workspace-notice" role="status">{workspace.linkNotice}</p>}
         {offlineSources.length > 0 && <p className="workspace-notice" role="status">Offline: {offlineSources.map(source => source.label).join(", ")}</p>}
         {(dataError || seriesError && needsSeries) && state.panel !== "images" && <p className="data-error" role="alert">Some metrics could not be updated. Available curves and previously loaded samples are retained.</p>}

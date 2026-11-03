@@ -1,8 +1,7 @@
 import Select from "./Select";
 import { useId, useState } from "react";
 import { PencilSimpleIcon, TargetIcon } from "@phosphor-icons/react";
-import { activeTarget, removeTarget, saveTarget, type MetricTargets } from "../targets";
-import type { WorkspaceState } from "../workspace";
+import { activeTarget, removeTarget, saveTarget, type MetricTargets, type TargetLibrary } from "../targets";
 import { formatMetric } from "../comparison";
 import Popover from "./Popover";
 import TargetEditor from "./TargetEditor";
@@ -36,20 +35,20 @@ function MetricTargetsEditor({ metric, group, onChange }: { metric: string; grou
   </div>;
 }
 
-export default function TargetsMenu({ metrics, state, onChange }: { metrics: string[]; state: WorkspaceState; onChange: (patch: Partial<WorkspaceState>) => void }) {
+export default function TargetsMenu({ metrics, targets, onChange }: { metrics: string[]; targets: TargetLibrary; onChange: (targets: TargetLibrary) => void }) {
   const [chosen, setChosen] = useState("");
-  const names = [...new Set([...metrics, ...Object.keys(state.targets)])].sort();
+  const names = [...new Set([...metrics, ...Object.keys(targets)])].sort();
   const metric = names.includes(chosen) ? chosen : names[0];
   function save(name: string, group: MetricTargets) {
-    const targets = { ...state.targets };
-    if (group.items.length) targets[name] = group; else delete targets[name];
-    onChange({ targets });
+    const next = { ...targets };
+    if (group.items.length) next[name] = group; else delete next[name];
+    onChange(next);
   }
-  const count = Object.values(state.targets).reduce((total, group) => total + group.items.length, 0);
+  const count = Object.values(targets).reduce((total, group) => total + group.items.length, 0);
   return <Popover className="targets-menu" label="Targets" trigger={<><TargetIcon size={16} /><span>Targets</span>{count > 0 && <small>{count}</small>}</>}>
-    <div className="menu-heading">Target reference values</div><p className="menu-note">Shared by Charts and Table. One active target per metric.</p>
+    <div className="menu-heading">Target reference values</div><p className="menu-note">Workspace-wide. Shared by Charts and Table in every View. One active target per metric.</p>
     {metric ? <><label className="target-metric-choice">Metric<Select aria-label="Target metric" value={metric} onChange={(event) => setChosen(event.target.value)}>{names.map((name) => <option key={name}>{name}</option>)}</Select></label>
-      <MetricTargetsEditor key={metric} metric={metric} group={state.targets[metric]} onChange={(group) => save(metric, group)} />
+      <MetricTargetsEditor key={metric} metric={metric} group={targets[metric]} onChange={(group) => save(metric, group)} />
     </> : <p className="menu-note">Select a run with metrics to set a target.</p>}
   </Popover>;
 }

@@ -131,6 +131,11 @@ class MetricTargets(BaseModel):
         return self
 
 
+class TargetLibrarySave(BaseModel):
+    targets: dict[str, MetricTargets] = Field(default_factory=dict)
+    saved_at: int = Field(default=0, ge=0)
+
+
 class RunRule(BaseModel):
     field: str = Field(min_length=1, max_length=500)
     operator: Literal["eq", "neq", "contains", "gt", "gte", "lt", "lte", "exists", "missing", "has_any", "has_all", "has_none", "empty", "not_empty"]
@@ -294,6 +299,8 @@ class WorkspaceState(BaseModel):
     sort_desc: bool = False
     active_view_id: str | None = None
     baseline_id: str | None = None
+    # Deprecated: targets live in the workspace-level target library. The field
+    # stays so payloads written before the move keep parsing (extra="forbid").
     targets: dict[str, MetricTargets] = Field(default_factory=dict)
     colors: ColorSettings = Field(default_factory=ColorSettings)
 
@@ -322,6 +329,7 @@ class WorkspaceConfig(PaletteLibrary):
     version: Literal[1] = 1
     state: WorkspaceState
     views: list[SavedView] = Field(max_length=128)
+    target_library: TargetLibrarySave = Field(default_factory=TargetLibrarySave)
     saved_at: int = Field(ge=0)
 
     @model_validator(mode="after")
@@ -371,3 +379,4 @@ class WorkspaceSnapshot(BaseModel):
     state: WorkspaceState | None = None
     saved_at: int = 0
     views: list[SavedView] = Field(default_factory=list)
+    target_library: TargetLibrarySave = Field(default_factory=TargetLibrarySave)

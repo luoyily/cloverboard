@@ -7,6 +7,7 @@ import {
 import type { ReactNode } from "react";
 import type { ThemeMode } from "../theme";
 import type { SavedView, WorkspaceState } from "../workspace";
+import type { TargetLibrary } from "../targets";
 import type { ViewingConfig } from "../viewingConfig";
 import type { SettingsMode } from "../workspaceSession";
 import ChartToolbar from "./ChartToolbar";
@@ -32,6 +33,8 @@ interface TopBarProps {
   ready: boolean;
   storageError: string;
   onChange: (patch: Partial<WorkspaceState>) => void;
+  targets: TargetLibrary;
+  onSaveTargets: (targets: TargetLibrary) => void;
   onOpenView: (view: SavedView) => void;
   onSaveView: (name: string, viewId?: string) => Promise<void>;
   onDeleteView: (viewId: string) => Promise<void>;
@@ -57,6 +60,7 @@ export default function TopBar({
   ready,
   storageError,
   onChange,
+  targets, onSaveTargets,
   onOpenView,
   onSaveView,
   onDeleteView, onRenameView,
@@ -94,7 +98,7 @@ export default function TopBar({
       </div>
       <div className="toolbar-right">
         {colorControls}
-        {state.panel !== "images" && <TargetsMenu metrics={metrics} state={state} onChange={onChange} />}
+        {state.panel !== "images" && <TargetsMenu metrics={metrics} targets={targets} onChange={onSaveTargets} />}
         {state.panel === "charts" ? <ChartToolbar
           metrics={metrics} topK={state.colors.top_k} onTopKChange={(top_k) => onChange({ colors: { ...state.colors, top_k } })}
           metricFilter={state.metric_filter} onMetricFilterChange={(metric_filter) => onChange({ metric_filter })}

@@ -8,7 +8,7 @@ import ts from "typescript";
 
 const directory = await mkdtemp(join(tmpdir(), "cloverboard-tests-"));
 after(() => rm(directory, { recursive: true, force: true }));
-for (const name of ["palettes", "comparison", "features", "targets", "chartMath", "colorMath", "colors", "api", "workspace", "readout", "imageTimeline", "dataCache", "runSelection"]) {
+for (const name of ["palettes", "comparison", "features", "targets", "chartMath", "colorMath", "colors", "api", "workspace", "viewingConfig", "readout", "imageTimeline", "dataCache", "runSelection"]) {
   const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), "utf8");
   let { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
   outputText = outputText.replace(/from "\.\/([^"]+)"/g, 'from "./$1.mjs"').replace('from "react"', `from "${pathToFileURL(resolve("node_modules/react/index.js")).href}"`);
@@ -28,6 +28,7 @@ const { nearestPoint, buildPath, compareReadouts, valueDomain, fittedDomain, log
 const { pooledResults, getJson, fetchRunsWithEtag } = await import(pathToFileURL(join(directory, "api.mjs")));
 const { BoundedCache, RequestCache } = await import(pathToFileURL(join(directory, "dataCache.mjs")));
 const { defaultWorkspaceState, normalizeState, viewStateKey, encodeSharedState, readSharedLocation } = await import(pathToFileURL(join(directory, "workspace.mjs")));
+const configModule = await import(pathToFileURL(join(directory, "viewingConfig.mjs")));
 const comparison = await import(pathToFileURL(join(directory, "comparison.mjs")));
 const run = (id, config = {}, source = "local") => ({ run_id: id, name: id, source, started_at: 1, has_scalars: true, last_recorded_at: null, config });
 
@@ -64,13 +65,20 @@ test("active targets drive delta and attainment and deletion never selects anoth
   assert.equal(targets.saveTarget(removed, small).active_id, null);
 });
 
-test("named targets normalize invalid references and survive shared state without label truncation", () => {
+test("named targets normalize invalid references and never travel inside shared links or View states", () => {
   const target = { id: "goal", name: "Complete name ".repeat(30), chart_label: "Display ".repeat(40), value: .2, direction: "lte" };
   const group = { items: [target], active_id: target.id };
-  const state = normalizeState({ targets: { loss: group } });
-  const shared = readSharedLocation(`http://localhost/#state=${encodeSharedState(state)}`).state;
-  assert.deepEqual(shared.targets.loss, group);
-  assert.notEqual(viewStateKey(state), viewStateKey({ ...state, targets: { loss: { ...group, active_id: null } } }));
+  // Targets are workspace-level: shared links and View states never carry them.
+  const state = normalizeState({});
+  assert.equal(readSharedLocation(`http://localhost/#state=${encodeSharedState(state)}`).state.targets, undefined);
+  assert.equal(viewStateKey(normalizeState({ targets: { loss: group } })), viewStateKey(state));
+  // Configs saved before the move hoist legacy per-View targets on read.
+  const config = configModule.parseConfig({
+    version: 1, palettes: [],
+    views: [{ view_id: "a".repeat(32), name: "Old", state: { ...defaultWorkspaceState(), targets: { loss: group } } }],
+    state: { ...defaultWorkspaceState() },
+  });
+  assert.deepEqual(config.targets.loss, group);
   const invalid = targets.normalizeTargets({ loss: { items: [target, { ...target }, { ...target, id: "bad", value: Infinity }], active_id: "bad" } });
   assert.deepEqual(invalid.loss, { items: [target], active_id: null });
   assert.deepEqual(targets.normalizeTargets({ loss: { items: [], active_id: null } }), {});

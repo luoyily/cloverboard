@@ -5,7 +5,7 @@ import type { MetricSeries, SeriesSnapshot } from "../scalarSeries";
 import { CaretDownIcon, CaretRightIcon } from "@phosphor-icons/react";
 import MetricChart from "./MetricChart";
 import { effectiveWarmup } from "../features";
-import { activeTarget } from "../targets";
+import { activeTarget, type TargetLibrary } from "../targets";
 import { legendLabelMap } from "../comparison";
 
 const EMPTY_SERIES: MetricSeries = new Map();
@@ -19,6 +19,7 @@ interface ChartGridProps {
   colors: Map<string, string>;
   smoothing: number;
   state: WorkspaceState;
+  targets: TargetLibrary;
   summaries: Map<string, ScalarSummary>;
   onChange: WorkspaceUpdate;
   focusedId: string | null;
@@ -27,7 +28,7 @@ interface ChartGridProps {
   topIds: Set<string> | null;
 }
 
-export default function ChartGrid({ metrics, loadingMetrics, dataTick, runs, series, colors, smoothing, state, summaries, onChange, focusedId, onFocusRun, onLocateRun, topIds }: ChartGridProps) {
+export default function ChartGrid({ metrics, loadingMetrics, dataTick, runs, series, colors, smoothing, state, targets, summaries, onChange, focusedId, onFocusRun, onLocateRun, topIds }: ChartGridProps) {
   const groups = useMemo(() => {
     const grouped = new Map<string, MetricField[]>();
     for (const field of metrics) {
@@ -60,7 +61,7 @@ export default function ChartGrid({ metrics, loadingMetrics, dataTick, runs, ser
           tooltipDecimals={state.tooltip_decimals} tooltipSort={state.tooltip_sort} timeDisplay={state.tooltip_time} deltaDisplay={state.tooltip_delta}
           showLegend={state.show_chart_legend} legendLayout={state.chart_legend_layout} legendLabels={legendLabels} tooltipPlacement={state.tooltip_placement} onLocateRun={onLocateRun}
           warmupStep={effectiveWarmup(state.chart_warmup[metric], state.y_warmup)} warmupOverride={state.chart_warmup[metric]} globalWarmup={state.y_warmup}
-          summaries={summaries} target={activeTarget(state.targets[metric])} baselineId={state.baseline_id}
+          summaries={summaries} target={activeTarget(targets[metric])} baselineId={state.baseline_id}
           focusedId={focusedId} onFocusRun={onFocusRun} topIds={topIds}
         />)}</div>}
       </section>;

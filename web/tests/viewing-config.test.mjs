@@ -142,7 +142,7 @@ test("imported colors and fixed flags persist inside the current state and named
 });
 
 function sessionFixture(t, writable = true, memory = new Map()) {
-  const remote = { workspace_id: "workspace-a", writable, saved_at: 1, state: workspace.defaultWorkspaceState(), views: [] };
+  const remote = { workspace_id: "workspace-a", writable, saved_at: 1, state: workspace.defaultWorkspaceState(), views: [], target_library: { targets: {}, saved_at: 1 } };
   const palettes = []; let serial = 0;
   const writes = [], failures = new Set();
   const storage = { getItem: key => memory.get(key) ?? null, setItem: (key, value) => memory.set(key, value) };
@@ -152,8 +152,10 @@ function sessionFixture(t, writable = true, memory = new Map()) {
     writes.push({ url, method, body });
     if (!writable || failures.has(url)) throw new Error("Request failed");
     if (url.endsWith("/state")) { Object.assign(remote, body); return structuredClone(remote); }
+    if (url.endsWith("/targets")) { remote.target_library = body; return structuredClone(remote.target_library); }
     if (url.endsWith("/config")) {
       remote.views = body.views; remote.state = body.state; remote.saved_at = body.saved_at;
+      remote.target_library = body.target_library;
       palettes.splice(0, palettes.length, ...body.palettes);
       return structuredClone(remote);
     }
@@ -336,7 +338,6 @@ function watchingSettings() {
     selected_ids: ["baseline", "trial"], baseline_id: "baseline", search: "trial|baseline", search_regex: true,
     tag_filter: ["reviewed"], tag_filter_match: "all", run_sort: "name_desc", panel: "table",
     colors: { ...workspace.defaultWorkspaceState().colors, runs: { trial: { color: "#abcdef", fixed: true } }, top_k: { enabled: true, metric: "score", direction: "max", readout: "best", k: 2 } },
-    targets: { score: { items: [{ id: "goal", name: "Goal", chart_label: "G", value: .9, direction: "gte" }], active_id: "goal" } },
     metric_filter: "loss", chart_density: "compact", show_chart_legend: false, chart_legend_layout: "single", chart_legend_trim_prefix: true, smoothing: .2,
     y_scale: "log", y_warmup: 100, chart_scales: { score: "linear" }, chart_warmup: { score: null },
     collapsed_groups: ["train"], expanded_charts: ["validation/score"],
@@ -395,6 +396,39 @@ test("saving a palette only changes its library in either mode", async t => {
     assert.deepEqual(session.getSnapshot().state, before);
     assert.equal(session.getConfig().palettes[0].name, "Ocean");
   }
+});
+
+test("targets are a workspace library that survives View switches in either mode", async t => {
+  const f = sessionFixture(t), { session } = f;
+  await session.load("http://localhost/");
+  for (const mode of ["remote", "local"]) {
+    await session.setMode(mode);
+    const before = structuredClone(session.getSnapshot().state);
+    const library = { score: { items: [{ id: "goal", name: "Goal", chart_label: "G", value: .9, direction: "gte" }], active_id: "goal" } };
+    await session.saveTargets(library);
+    assert.deepEqual(session.getSnapshot().state, before); // The library never enters viewing state.
+    assert.deepEqual(session.getConfig().targets, library);
+    await session.saveView("With targets");
+    assert.equal(Object.hasOwn(session.getConfig().views[0].state, "targets"), false);
+    session.openView(session.getConfig().views[0]);
+    assert.deepEqual(session.getSnapshot().targets, library); // Switching Views keeps the library.
+    if (mode === "remote") assert.deepEqual(f.remote.target_library.targets, library);
+  }
+});
+
+test("legacy per-View targets are hoisted into the library when a local config is read", () => {
+  const target = { id: "goal", name: "Goal", chart_label: "G", value: .9, direction: "gte" };
+  const group = { items: [target], active_id: target.id };
+  const legacy = {
+    version: 1, palettes: [],
+    views: [{ view_id: "a".repeat(32), name: "Old", state: { ...workspace.defaultWorkspaceState(), targets: { loss: group } } }],
+    state: { ...workspace.defaultWorkspaceState(), targets: { score: group } },
+  };
+  const config = configModule.parseConfig(legacy);
+  assert.deepEqual(config.targets, { loss: group, score: group });
+  assert.equal(Object.hasOwn(config.state, "targets"), false);
+  assert.equal(Object.hasOwn(config.views[0].state, "targets"), false);
+  assert.deepEqual(configModule.parseConfigFile(configModule.exportConfig(config)), config);
 });
 
 for (const mode of ["remote", "local", "readonly"]) test(`${mode}: confirmed run cleanup saves current settings without rewriting Views or palettes`, async t => {

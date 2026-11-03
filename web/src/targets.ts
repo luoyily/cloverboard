@@ -11,6 +11,9 @@ export interface MetricTargets {
   active_id: string | null;
 }
 
+// Workspace-wide library keyed by metric; shared by every View, chart, and table.
+export type TargetLibrary = Record<string, MetricTargets>;
+
 export function activeTarget(group: MetricTargets | undefined): NamedTarget | undefined {
   return group?.items.find((item) => item.id === group.active_id);
 }

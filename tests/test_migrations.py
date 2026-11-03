@@ -61,6 +61,48 @@ def _plan_for(plans, kind, run_id=None):
     return next(plan for plan in plans if plan.kind == kind and plan.run_id == run_id)
 
 
+def test_workspace_v1_to_v2_moves_targets_into_the_workspace_library(tmp_path):
+    goal = {"id": "goal", "name": "Goal", "chart_label": "G", "value": .9, "direction": "gte"}
+    group = {"items": [goal], "active_id": "goal"}
+    view_only = {"items": [{**goal, "id": "loss-goal", "name": "Loss goal", "chart_label": ""}], "active_id": None}
+    path = _make_workspace(
+        tmp_path, version=1,
+        state={"version": 1, "targets": {"score": group}},
+        view_state={"version": 1, "targets": {
+            "score": {"items": [{**goal, "id": "old", "name": "Old", "chart_label": ""}], "active_id": "old"},
+            "loss": view_only,
+        }},
+    )
+
+    report = migrate_logdir(tmp_path, apply=True)
+
+    assert report.ok, report.errors
+    assert _user_version(path) == WORKSPACE_SCHEMA_VERSION
+    with closing(sqlite3.connect(path)) as connection:
+        library = json.loads(connection.execute("SELECT payload FROM target_library WHERE id=1").fetchone()[0])
+        # The current state wins per metric; metrics found only in Views are kept.
+        assert library["targets"]["score"] == group
+        assert library["targets"]["loss"] == view_only
+        assert json.loads(_workspace_payload(path))["state"]["targets"] == {}
+        assert json.loads(connection.execute("SELECT state FROM views").fetchone()[0])["targets"] == {}
+    snapshot = WorkspaceStore(tmp_path).snapshot()
+    assert snapshot.target_library.targets["score"].active_id == "goal"
+
+
+def test_unmigrated_workspace_surfaces_legacy_state_targets(tmp_path):
+    goal = {"id": "goal", "name": "Goal", "chart_label": "", "value": .9, "direction": "gte"}
+    path = _make_workspace(tmp_path, version=1, state={"version": 1, "targets": {"score": {"items": [goal], "active_id": "goal"}}})
+    with closing(sqlite3.connect(path)) as connection:  # A real v1 database has no library table.
+        connection.execute("DROP TABLE target_library")
+        connection.commit()
+
+    snapshot = WorkspaceStore(tmp_path).snapshot()
+
+    assert snapshot.target_library.targets["score"].items[0].value == .9
+    assert snapshot.target_library.saved_at == 10
+    assert _user_version(path) == 1
+
+
 def test_workspace_v0_is_stamped_without_rewriting_payload(tmp_path):
     path = _make_workspace(tmp_path)
     payload = _workspace_payload(path)

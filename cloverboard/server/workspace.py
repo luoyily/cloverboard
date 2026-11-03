@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from cloverboard.server.models import (
     SavedView, SavedViewInput, ViewRename, WorkspaceSave, WorkspaceSnapshot,
     WorkspaceState, PaletteLibrary, PaletteInput, CustomPalette, WorkspaceConfig,
+    TargetLibrarySave,
 )
 from cloverboard.migrations.versions import WORKSPACE_SCHEMA_VERSION
 from cloverboard.storage.paths import resolve_log_path
@@ -27,6 +28,9 @@ CREATE TABLE IF NOT EXISTS views (
     view_id TEXT PRIMARY KEY, name TEXT NOT NULL, state TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS palette_library (
+    id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS target_library (
     id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL
 );
 """
@@ -137,6 +141,36 @@ class WorkspaceStore:
             connection.execute("INSERT OR REPLACE INTO palette_library VALUES (1, ?)", (colors.model_dump_json(),))
             return palette
 
+    def _read_target_library(self, connection) -> TargetLibrarySave:
+        # Workspaces created before schema 2 may not have the table yet, and a
+        # served-but-unmigrated one can have the empty table with no row.
+        row = None
+        if connection is not None:
+            try:
+                row = connection.execute("SELECT payload FROM target_library WHERE id=1").fetchone()
+            except sqlite3.OperationalError:
+                row = None
+        if row:
+            try:
+                return TargetLibrarySave.model_validate_json(row[0])
+            except ValidationError as error:
+                raise HTTPException(503, "Invalid workspace target library") from error
+        # Unmigrated workspace: surface legacy per-View targets until the
+        # schema 2 migration moves them into the library.
+        legacy = connection.execute("SELECT payload FROM workspace_state WHERE id=1").fetchone() if connection else None
+        try:
+            saved = WorkspaceSave.model_validate_json(legacy[0]) if legacy else None
+        except ValidationError:
+            saved = None
+        return TargetLibrarySave(targets=saved.state.targets if saved else {}, saved_at=saved.saved_at if saved else 0)
+
+    def save_targets(self, payload: TargetLibrarySave) -> TargetLibrarySave:
+        with self._connection(write=True) as connection:
+            current = self._read_target_library(connection)
+            if current.saved_at <= payload.saved_at:
+                connection.execute("INSERT OR REPLACE INTO target_library VALUES (1, ?)", (payload.model_dump_json(),))
+            return self._read_target_library(connection)
+
     def snapshot(self) -> WorkspaceSnapshot:
         with self._connection() as connection:
             row = connection.execute("SELECT payload FROM workspace_state WHERE id=1").fetchone() if connection else None
@@ -157,6 +191,7 @@ class WorkspaceStore:
             return WorkspaceSnapshot(
                 workspace_id=self.workspace_id, writable=self.writable,
                 state=state, saved_at=saved.saved_at if saved else 0, views=views,
+                target_library=self._read_target_library(connection),
             )
 
     def save_state(self, payload: WorkspaceSave) -> WorkspaceSnapshot:
@@ -178,6 +213,7 @@ class WorkspaceStore:
                 (view.view_id, view.name, view.state.model_copy(update={"active_view_id": None}).model_dump_json()) for view in payload.views
             ])
             connection.execute("INSERT OR REPLACE INTO palette_library VALUES (1, ?)", (PaletteLibrary(palettes=payload.palettes).model_dump_json(),))
+            connection.execute("INSERT OR REPLACE INTO target_library VALUES (1, ?)", (payload.target_library.model_dump_json(),))
             connection.execute("INSERT OR REPLACE INTO workspace_state VALUES (1, ?)", (WorkspaceSave(state=payload.state, saved_at=payload.saved_at).model_dump_json(),))
 
     @staticmethod
@@ -251,6 +287,15 @@ def update_palette(palette_id: str, payload: PaletteInput, store: WorkspaceStore
 def delete_palette(palette_id: str, store: WorkspaceStore = Depends(get_workspace)):
     """Remove a palette from the library; saved viewing snapshots remain self-contained."""
     return store.delete_palette(palette_id)
+
+
+@router.put("/targets", response_model=TargetLibrarySave)
+def save_targets(payload: TargetLibrarySave, store: WorkspaceStore = Depends(get_workspace)):
+    """Replace the workspace-wide target library if saved_at is not older.
+
+    Targets are shared by every View, chart, and table in this workspace.
+    """
+    return store.save_targets(payload)
 
 
 @router.put("/state", response_model=WorkspaceSnapshot)

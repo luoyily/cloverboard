@@ -1,17 +1,23 @@
 import type { CustomPalette, PaletteInput } from "./palettes";
 import { normalizeState, readSharedLocation, type SavedView, type WorkspaceState, type WorkspaceUpdate } from "./workspace";
+import { normalizeTargets, type TargetLibrary } from "./targets";
 import {
   initialConfig, mergeConfig, parseConfigFile, localConfigKey, readLocalConfig, restoreRemoteConfig,
   saveLocalPalette, saveLocalView, STORAGE_ERROR, writeLocalConfig, type ViewingConfig,
 } from "./viewingConfig";
 
 export type SettingsMode = "remote" | "local";
+interface TargetLibrarySave {
+  targets: TargetLibrary;
+  saved_at: number;
+}
 interface WorkspaceSnapshot {
   workspace_id: string;
   writable: boolean;
   saved_at: number;
   state: WorkspaceState | null;
   views: SavedView[];
+  target_library: TargetLibrarySave;
 }
 interface RemoteSettings { workspace: WorkspaceSnapshot; palettes: CustomPalette[] }
 interface StateSave { state: WorkspaceState; saved_at: number }
@@ -23,8 +29,8 @@ const initial = initialConfig(null);
 export class WorkspaceSession {
   private snapshot = {
     local: initial, remote: null as RemoteSettings | null, mode: "remote" as SettingsMode,
-    state: initial.state, contextVersion: 0, ready: false, loadError: false,
-    storageError: "", stateError: "", linkNotice: "",
+    state: initial.state, targets: {} as TargetLibrary, contextVersion: 0, ready: false, loadError: false,
+    storageError: "", stateError: "", targetsError: "", linkNotice: "",
   };
   private listeners = new Set<() => void>();
   private key = "";
@@ -47,7 +53,15 @@ export class WorkspaceSession {
     const [workspace, palettes] = await Promise.all([
       this.request<WorkspaceSnapshot>("/api/workspace"), this.request<CustomPalette[]>("/api/workspace/palettes"),
     ]);
-    return { workspace: { ...workspace, state: workspace.state ? normalizeState(workspace.state) : null, views: workspace.views.map(view => ({ ...view, state: normalizeState(view.state) })) }, palettes };
+    return {
+      workspace: {
+        ...workspace,
+        state: workspace.state ? normalizeState(workspace.state) : null,
+        views: workspace.views.map(view => ({ ...view, state: normalizeState(view.state) })),
+        target_library: { targets: normalizeTargets(workspace.target_library?.targets ?? {}), saved_at: workspace.target_library?.saved_at ?? 0 },
+      },
+      palettes,
+    };
   }
   private write(key: string, value: unknown) {
     try { this.storage().setItem(key, JSON.stringify(value)); this.publish({ storageError: "" }); }
@@ -63,10 +77,11 @@ export class WorkspaceSession {
   private activateLocal(local: ViewingConfig, required = false) {
     this.storeLocal(local, required);
     if (this.snapshot.mode !== "local") this.write(`${this.key}:mode`, "local");
-    this.replaceContext({ mode: "local", state: local.state });
+    this.replaceContext({ mode: "local", state: local.state, targets: local.targets });
   }
   getConfig = (): ViewingConfig => this.snapshot.mode === "local" ? this.snapshot.local : {
     version: 1, state: this.snapshot.state, views: this.snapshot.remote?.workspace.views ?? [], palettes: this.snapshot.remote?.palettes ?? [],
+    targets: this.snapshot.remote?.workspace.target_library.targets ?? {},
   };
   private requireRemote() {
     if (!this.snapshot.remote?.workspace.writable || this.snapshot.mode !== "remote") throw new Error("Switch to Remote workspace to edit remote settings.");
@@ -84,7 +99,7 @@ export class WorkspaceSession {
       const remote = await this.fetchRemote();
       if (generation !== this.generation) return false;
       this.key = localConfigKey(remote.workspace.workspace_id);
-      let local = initialConfig(remote.workspace.state, remote.workspace.views, remote.palettes), mode: SettingsMode = remote.workspace.writable ? "remote" : "local";
+      let local = initialConfig(remote.workspace.state, remote.workspace.views, remote.palettes, remote.workspace.target_library.targets), mode: SettingsMode = remote.workspace.writable ? "remote" : "local";
       let cacheError = "", cachedSave: StateSave | null = null;
       try {
         local = readLocalConfig(this.storage(), this.key) ?? local;
@@ -110,7 +125,7 @@ export class WorkspaceSession {
         if (!available.some(view => view.view_id === state.active_view_id)) state.active_view_id = null;
       } catch (reason) { linkNotice = reason instanceof Error ? reason.message : "Unable to restore shared link."; }
       this.pending = cachedSave;
-      this.replaceContext({ remote, local, mode, state, ready: true, storageError: cacheError, linkNotice });
+      this.replaceContext({ remote, local, mode, state, targets: mode === "local" ? local.targets : remote.workspace.target_library.targets, ready: true, storageError: cacheError, linkNotice });
       if (mode === "local") this.storeLocal({ ...local, state });
       else if (fromLink) this.saveRemoteState(state);
       if (cacheError) this.publish({ storageError: cacheError });
@@ -156,6 +171,25 @@ export class WorkspaceSession {
     if (this.snapshot.mode === "local") this.storeLocal({ ...this.snapshot.local, state });
     else this.saveRemoteState(state);
   };
+  // The target library is workspace-wide and saved independently of viewing state.
+  saveTargets = async (targets: TargetLibrary) => {
+    const library = normalizeTargets(targets);
+    if (!this.snapshot.ready) return;
+    if (this.snapshot.mode === "local") {
+      this.storeLocal({ ...this.snapshot.local, targets: library });
+      this.publish({ targets: library, targetsError: "" });
+      return;
+    }
+    try {
+      const remote = this.requireRemote();
+      const saved_at = Math.max(Date.now(), remote.workspace.target_library.saved_at + 1);
+      this.publish({ targets: library, targetsError: "" });
+      const saved = await this.mutate<TargetLibrarySave>("/api/workspace/targets", "PUT", { targets: library, saved_at });
+      this.publish({ remote: { ...this.snapshot.remote!, workspace: { ...this.snapshot.remote!.workspace, target_library: saved } }, targets: saved.targets });
+    } catch {
+      this.publish({ targetsError: "Could not save targets to the remote workspace. They are kept in this page; edit a target to retry." });
+    }
+  };
   setMode = async (mode: SettingsMode) => {
     if (mode === this.snapshot.mode) return;
     if (mode === "local") { this.activateLocal(this.snapshot.local, true); return; }
@@ -165,7 +199,7 @@ export class WorkspaceSession {
     const remote = await this.fetchRemote();
     if (!remote.workspace.writable) throw new Error("This server is read-only.");
     this.write(`${this.key}:mode`, "remote");
-    this.replaceContext({ remote, mode, state: normalizeState(remote.workspace.state ?? {}) });
+    this.replaceContext({ remote, mode, state: normalizeState(remote.workspace.state ?? {}), targets: remote.workspace.target_library.targets });
   };
   openView = (view: SavedView) => {
     if (!this.getConfig().views.some(item => item.view_id === view.view_id)) return;
@@ -219,21 +253,21 @@ export class WorkspaceSession {
   };
   importConfig = async (text: string) => {
     const incoming = parseConfigFile(text);
-    if (this.snapshot.mode === "local") { this.storeLocal(mergeConfig(this.snapshot.local, incoming), true); this.replaceContext(); return; }
+    if (this.snapshot.mode === "local") { this.storeLocal(mergeConfig(this.snapshot.local, incoming), true); this.replaceContext({ targets: this.snapshot.local.targets }); return; }
     await this.retryRemote();
     if (this.pending) throw new Error(this.snapshot.stateError);
     const remote = await this.fetchRemote();
-    const merged = mergeConfig(initialConfig(this.snapshot.state, remote.workspace.views, remote.palettes), incoming);
+    const merged = mergeConfig(initialConfig(this.snapshot.state, remote.workspace.views, remote.palettes, remote.workspace.target_library.targets), incoming);
     const saved_at = Math.max(Date.now(), remote.workspace.saved_at + 1);
-    const workspace = await this.mutate<WorkspaceSnapshot>("/api/workspace/config", "PUT", { ...merged, saved_at });
+    const workspace = await this.mutate<WorkspaceSnapshot>("/api/workspace/config", "PUT", { ...merged, saved_at, target_library: { targets: merged.targets, saved_at } });
     this.write(`${this.key}:remote`, { state: workspace.state, saved_at: workspace.saved_at });
-    this.replaceContext({ remote: { workspace, palettes: merged.palettes }, ...(this.snapshot.mode === "remote" ? { state: normalizeState(workspace.state ?? {}) } : {}) });
+    this.replaceContext({ remote: { workspace, palettes: merged.palettes }, ...(this.snapshot.mode === "remote" ? { state: normalizeState(workspace.state ?? {}), targets: workspace.target_library.targets } : {}) });
   };
   restoreRemote = async () => {
     if (this.snapshot.mode !== "local") throw new Error("Switch to Local mode to restore remote settings.");
     const remote = await this.fetchRemote();
-    this.storeLocal(restoreRemoteConfig(this.snapshot.local, remote.workspace.state), true);
-    this.replaceContext({ remote, linkNotice: "" });
+    this.storeLocal(restoreRemoteConfig(this.snapshot.local, remote.workspace.state, remote.workspace.target_library.targets), true);
+    this.replaceContext({ remote, targets: this.snapshot.local.targets, linkNotice: "" });
   };
   retryStorage = () => {
     this.storeLocal(this.snapshot.local);
