@@ -17,6 +17,7 @@ from cloverboard.importers.tensorboard.events import EventCursor, scalar_metric
 from cloverboard.importers.tensorboard.importer import TensorBoardImporter, discover_runs
 from cloverboard.logger.api import _shutdown
 from cloverboard.server.app import create_app
+from cloverboard.storage.protocols import ScalarRecord
 from cloverboard.storage.sqlite_backend import SqliteStorageReader, SqliteStorageWriter
 
 
@@ -74,7 +75,7 @@ def test_standard_dataset_preserves_precision_paths_gaps_and_source(tmp_path):
         assert client.get("/api/scalars", params={"run_id": run.run_id, "metric": "gap"}).json()["points"][0]["value"] is None
 
 
-def test_poll_reads_only_appends_and_enforces_filename_precedence(tmp_path, monkeypatch):
+def test_poll_reads_only_appends_and_keeps_newest_wall_time(tmp_path, monkeypatch):
     source, output = tmp_path / "source", tmp_path / "output"
     older = write_events(source / "experiment", "001", [event("loss", 2)])
     newer = write_events(source / "experiment", "002", [event("loss", 1)])
@@ -88,15 +89,16 @@ def test_poll_reads_only_appends_and_enforces_filename_precedence(tmp_path, monk
     monkeypatch.setattr(EventCursor, "read", counted_read)
     with TensorBoardImporter(source, output) as importer:
         importer.poll()
+        assert points(output) == [(10, 1, 120)]
         reads.clear()
         idle = importer.poll()
         assert (idle.changed_files, idle.events, idle.written) == (0, 0, 0)
         assert not reads
-        append_events(older, [event("loss", 9), event("loss", .8, step=20)])
+        append_events(older, [event("loss", 9, wall_time=110), event("loss", .8, step=20, wall_time=110)])
         result = importer.poll()
         assert result.scalars == 2 and result.written == 1
         assert reads[0][0] == older.name and reads[0][1] > 0
-        assert points(output) == [(10, 1, 120), (20, pytest.approx(.8), 120)]
+        assert points(output) == [(10, 1, 120), (20, pytest.approx(.8), 110)]
         append_events(newer, [event("loss", .7, step=20), event("loss", .6, step=20)])
         write_events(source / "new-experiment", "001", [event("loss", 4)])
         assert importer.poll().runs == 2
@@ -105,6 +107,35 @@ def test_poll_reads_only_appends_and_enforces_filename_precedence(tmp_path, monk
         importer.poll()
     assert points(output) == expected
     assert expected[-1][1] == pytest.approx(.6)
+
+
+def test_newer_wall_time_wins_even_from_an_older_filename(tmp_path):
+    source, output = tmp_path / "source", tmp_path / "output"
+    older = write_events(source / "experiment", "001", [event("loss", 2, wall_time=120)])
+    write_events(source / "experiment", "002", [event("loss", 1, wall_time=130)])
+    with TensorBoardImporter(source, output) as importer:
+        importer.poll()
+        assert points(output) == [(10, 1, 130)]
+        append_events(older, [event("loss", 9, wall_time=140)])
+        result = importer.poll()
+        assert result.scalars == 1 and result.written == 1
+        assert points(output) == [(10, 9, 140)]
+
+
+def test_imported_scalars_keep_max_wall_time_regardless_of_write_order(tmp_path):
+    run = tmp_path / "output" / "experiment"
+    run.mkdir(parents=True)
+    writer = SqliteStorageWriter(run / "run.sqlite")
+    writer.append_imported_scalars([ScalarRecord("loss", 1, 200, 2)])
+    writer.append_imported_scalars([ScalarRecord("loss", 1, 100, 1)])
+    writer.append_imported_scalars([ScalarRecord("loss", 1, 200, 9)])
+    writer.flush_and_close()
+    assert points(tmp_path / "output", "experiment") == [(1, 9, 200)]
+
+    writer = SqliteStorageWriter(run / "run.sqlite")
+    writer.append_imported_scalars([ScalarRecord("loss", 1, 300, 3)])
+    writer.flush_and_close()
+    assert points(tmp_path / "output", "experiment") == [(1, 3, 300)]
 
 
 def test_partial_tail_waits_and_resumes_without_replaying_completed_records(tmp_path):

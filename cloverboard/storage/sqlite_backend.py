@@ -109,8 +109,19 @@ class SqliteStorageWriter:
             self._conn.execute("INSERT OR REPLACE INTO meta VALUES ('last_recorded_at', ?)", (_dump(wall_time),))
 
     def append_scalars(self, batch: list[ScalarRecord]) -> None:
+        self._append_scalars(batch, keep_newer_wall_time=False)
+
+    def append_imported_scalars(self, batch: list[ScalarRecord]) -> int:
+        """Upsert imported scalars, keeping the newest wall_time for each key.
+
+        Equal timestamps keep the later write; importers process files in a
+        deterministic order so replay remains stable.
+        """
+        return self._append_scalars(batch, keep_newer_wall_time=True)
+
+    def _append_scalars(self, batch: list[ScalarRecord], *, keep_newer_wall_time: bool) -> int:
         if self._conn is None or not batch:
-            return
+            return 0
         with self._conn:
             origin = next((record for record in batch if record.step == 0 and math.isfinite(record.wall_time)), None)
             first = origin or next((record for record in batch if math.isfinite(record.wall_time)), None)
@@ -123,11 +134,19 @@ class SqliteStorageWriter:
             newest = max((record.wall_time for record in batch if math.isfinite(record.wall_time)), default=None)
             if newest is not None:
                 self._touch_last_recorded(newest)
-            self._conn.executemany(
+            statement = (
                 "INSERT INTO scalars(metric, step, wall_time, value) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(metric, step) DO UPDATE SET wall_time=excluded.wall_time, value=excluded.value",
+                "ON CONFLICT(metric, step) DO UPDATE SET wall_time=excluded.wall_time, value=excluded.value"
+            )
+            if keep_newer_wall_time:
+                statement += " WHERE excluded.wall_time >= scalars.wall_time"
+            before = self._conn.total_changes
+            self._conn.executemany(
+                statement,
                 [(record.metric, record.step, record.wall_time, record.value) for record in batch],
             )
+            written = self._conn.total_changes - before
+        return written
 
     def append_image(self, image: ImageRecord) -> None:
         if self._conn is None:

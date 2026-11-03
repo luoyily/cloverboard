@@ -25,7 +25,6 @@ class SourceRun:
 @dataclass
 class RunCursor:
     files: dict[str, EventCursor] = field(default_factory=dict)
-    owners: dict[tuple[str, int], str] = field(default_factory=dict)
 
 
 @dataclass
@@ -116,9 +115,10 @@ def _claim_output(output: Path, source: Path) -> sqlite3.Connection:
 class TensorBoardImporter:
     """Single-producer scalar import with in-memory event cursors.
 
-    Source and output must be disjoint. Use as a context manager, then call
-    poll() once or periodically. Restarting replays the source with upserts;
-    byte offsets are intentionally not persisted. Errors require a fresh poll.
+    Source and output must be disjoint. Duplicate (metric, step) values keep
+    the newest wall_time. Use as a context manager, then call poll() once or
+    periodically. Restarting replays the source with upserts; byte offsets are
+    intentionally not persisted. Errors require a fresh poll.
     """
 
     def __init__(self, source: str | Path, output: str | Path):
@@ -173,8 +173,8 @@ class TensorBoardImporter:
                 for name, stamp in current.items()
             )
             if removed or replaced:
-                # Replaying this Run restores filename precedence when a file loses
-                # records. No target rows are deleted, including source-only history.
+                # Replaying this Run re-reads every surviving file. No target rows
+                # are deleted, including source-only history.
                 cursor = self._runs[run.run_id] = RunCursor()
                 result.replayed_runs += 1
             changed = [(path, stamp) for path, stamp in run.files
@@ -229,19 +229,13 @@ class TensorBoardImporter:
                         result.scalars += 1
                         metric = scalar_metric(value.tag)
                         tag_map[value.tag] = metric
-                        key = (metric, event.step)
-                        owner = cursor.owners.get(key)
-                        if owner is not None and owner > path.name:
-                            continue
-                        cursor.owners[key] = path.name
                         batch.append(ScalarRecord(metric, event.step, event.wall_time, number))
-                        result.written += 1
                         if len(batch) >= 4096:
-                            writer.append_scalars(batch)
+                            result.written += writer.append_imported_scalars(batch)
                             batch.clear()
                 if event_cursor.incomplete and not allow_incomplete:
                     raise ValueError(f"Incomplete or corrupt event file: {path}; use --follow to wait for an unfinished tail")
-            writer.append_scalars(batch)
+            result.written += writer.append_imported_scalars(batch)
             if not existing:
                 writer.init_run(RunMeta(run.run_id, run.run_id, started_at or 0, env={
                     "tensorboard_import": {"directory": run.directory, "tag_map": tag_map},
