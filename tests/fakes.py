@@ -4,6 +4,7 @@ from typing import Any
 from dataclasses import replace
 import math
 
+from cloverboard.naming import normalize_display_name
 from cloverboard.storage.protocols import (
     RunMeta, RunNotFound,
     RunSummary,
@@ -165,6 +166,14 @@ class FakeStorageReader:
                 tags = sorted((set(run.tags) - set(remove)) | set(add))
                 self._runs[index] = replace(run, tags=tags)
                 return tags
+        raise RunNotFound("Run not found")
+
+    def update_run_display_name(self, run_id, display_name):
+        display_name = normalize_display_name(display_name)
+        for index, run in enumerate(self._runs):
+            if run.run_id == run_id:
+                self._runs[index] = replace(run, display_name=display_name)
+                return display_name
         raise RunNotFound("Run not found")
 
     def audio_names(self, run_id):

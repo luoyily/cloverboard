@@ -8,9 +8,12 @@ import ts from "typescript";
 
 const directory = await mkdtemp(join(tmpdir(), "cloverboard-selection-"));
 after(() => rm(directory, { recursive: true, force: true }));
-const source = await readFile(new URL("../src/runSelection.ts", import.meta.url), "utf8");
-const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
-await writeFile(join(directory, "runSelection.mjs"), outputText);
+for (const name of ["comparison", "runSelection"]) {
+  const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), "utf8");
+  let { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
+  outputText = outputText.replace(/from "\.\/([^"]+)"/g, 'from "./$1.mjs"');
+  await writeFile(join(directory, `${name}.mjs`), outputText);
+}
 const { availableSelection, reconcileSelection, selectionPatch, replaceSelection } = await import(pathToFileURL(join(directory, "runSelection.mjs")));
 
 const run = (id, started_at = 1) => ({ run_id: id, source: id.includes(":") ? id.split(":")[0] : "local", started_at, has_scalars: true });

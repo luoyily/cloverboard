@@ -1,11 +1,13 @@
 import type { RunCatalog, RunSummary } from "./api";
+import { runName } from "./comparison";
 import type { WorkspaceState } from "./workspace";
 
 export function sortRuns(runs: RunSummary[], order: WorkspaceState["run_sort"]): RunSummary[] {
   return [...runs].sort((a, b) => {
     let difference = 0;
     if (order === "name_asc" || order === "name_desc") {
-      difference = (a.name ?? a.run_id).localeCompare(b.name ?? b.run_id, undefined, { numeric: true });
+      difference = runName(a).localeCompare(runName(b), undefined, { numeric: true });
+      if (!difference) difference = (a.name ?? a.run_id).localeCompare(b.name ?? b.run_id, undefined, { numeric: true });
       if (order === "name_desc") difference = -difference;
     } else difference = order === "started_asc" ? a.started_at - b.started_at : b.started_at - a.started_at;
     return difference || a.source.localeCompare(b.source) || a.run_id.localeCompare(b.run_id);
@@ -74,7 +76,7 @@ export function createRunSearch(text: string, regex: boolean): RunSearch {
     return { matches: () => false, error: reason instanceof Error ? reason.message : "Invalid regular expression" };
   }
   return {
-    matches: (run) => [run.name ?? run.run_id, run.run_id, run.source_label ?? run.source].some((value) => pattern.test(value)),
+    matches: (run) => [runName(run), run.name ?? run.run_id, run.run_id, run.source_label ?? run.source].some((value) => pattern.test(value)),
     error: null,
   };
 }

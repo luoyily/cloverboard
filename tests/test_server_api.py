@@ -42,10 +42,12 @@ def test_runs_endpoint_serializes_reader_output():
         {
             "run_id": "r1",
             "name": "demo",
+            "display_name": None,
             "started_at": 123.0,
             "config": {"lr": 0.1},
             "source": "local",
-            "has_notes": False, "note_excerpt": "", "tags": [], "tags_writable": True, "has_scalars": False, "last_recorded_at": None,
+            "has_notes": False, "note_excerpt": "", "tags": [], "tags_writable": True,
+            "display_name_writable": True, "has_scalars": False, "last_recorded_at": None,
         }
     ]
 

@@ -10,15 +10,17 @@ interface RunActionsProps {
   onBaseline: (id: string | null) => void;
   onDetails: (run: RunSummary, tab: "overview" | "notes") => void;
   onEditTags: (runs: RunSummary[]) => void;
+  onRename?: (run: RunSummary) => void;
 }
 
-export default function RunActions({ run, baselineId, onBaseline, onDetails, onEditTags }: RunActionsProps) {
+export default function RunActions({ run, baselineId, onBaseline, onDetails, onEditTags, onRename }: RunActionsProps) {
   function close(event: MouseEvent<HTMLButtonElement>) {
     event.currentTarget.closest("details")?.removeAttribute("open");
   }
   return <Popover className="run-actions-menu" label={`Run actions for ${runLabel(run)}`} trigger={<DotsThreeIcon size={18} aria-hidden="true" />}>
     <div className="menu-heading">{runLabel(run)}</div>
     <button className="menu-item" onClick={(event) => { close(event); onDetails(run, "overview"); }}>Details</button>
+    {onRename && run.display_name_writable !== false && <button className="menu-item" onClick={(event) => { close(event); onRename(run); }}>Rename display name…</button>}
     <button className="menu-item" onClick={(event) => { close(event); onEditTags([run]); }}>{run.tags_writable === false ? "View tags" : "Edit tags"}</button>
     <button className="menu-item" onClick={(event) => { close(event); onDetails(run, "notes"); }}><span>Notes</span>{run.has_notes && <span className="note-indicator" aria-label="Note recorded" />}</button>
     <div className="settings-divider" />

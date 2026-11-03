@@ -70,15 +70,19 @@ export function formatMetric(value: number | null | undefined, decimals?: number
   return Number(text) === 0 ? (0).toFixed(places) : text;
 }
 
+export function runName(run: RunSummary): string {
+  return run.display_name?.trim() || run.name || run.run_id;
+}
+
 export function runLabel(run: RunSummary): string {
-  const name = run.name ?? run.run_id;
+  const name = runName(run);
   return run.source_label ? `${name} · ${run.source_label}` : name;
 }
 
 export function legendLabelMap(runs: RunSummary[], trimCommonPrefix: boolean): Map<string, string> {
   const entries = runs.map((run) => ({
     run,
-    name: run.name ?? run.run_id,
+    name: runName(run),
     suffix: run.source_label ? ` · ${run.source_label}` : "",
     full: runLabel(run),
   }));

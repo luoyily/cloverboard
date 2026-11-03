@@ -12,7 +12,7 @@ from starlette.concurrency import run_in_threadpool
 
 from cloverboard.server.routes import get_run_reader, get_run_id
 from cloverboard.storage.protocols import StorageReader, RunNote, NoteConflict, ImagePage, MediaTimeline, MediaNameSummary, AudioPage, RunDetails, TextRecord
-from cloverboard.server.models import NoteInput, TagUpdate, TagsResponse, SourceStatusResponse, ShareTokenResponse
+from cloverboard.server.models import DisplayNameInput, DisplayNameResponse, NoteInput, TagUpdate, TagsResponse, SourceStatusResponse, ShareTokenResponse
 from cloverboard.server.thumbnails import thumbnail_cache
 
 router = APIRouter(prefix="/api")
@@ -85,6 +85,17 @@ def update_tags(payload: TagUpdate, run_id: str = Depends(get_run_id), reader: S
     """Apply tag additions/removals. Peer tags are read-only; removals are applied before additions."""
     try:
         return TagsResponse(tags=reader.update_run_tags(run_id, payload.add, payload.remove))
+    except PermissionError as error:
+        raise HTTPException(403, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
+
+@router.patch("/run-display-name", tags=["Runs"], response_model=DisplayNameResponse)
+def update_display_name(payload: DisplayNameInput, run_id: str = Depends(get_run_id), reader: StorageReader = Depends(get_run_reader)) -> DisplayNameResponse:
+    """Set or clear a display name; an empty value falls back to the recorded name."""
+    try:
+        return DisplayNameResponse(display_name=reader.update_run_display_name(run_id, payload.display_name))
     except PermissionError as error:
         raise HTTPException(403, str(error)) from error
     except ValueError as error:

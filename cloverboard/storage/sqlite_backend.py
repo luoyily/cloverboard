@@ -29,6 +29,7 @@ from cloverboard.storage.protocols import (
     StorageWriter,
 )
 from cloverboard.storage.schema import SCHEMA_VERSION, create_schema
+from cloverboard.naming import normalize_display_name
 from cloverboard.tags import normalize_tags
 from cloverboard.storage.paths import UnsafeLogPathError, resolve_log_path, validate_run_id
 
@@ -305,6 +306,10 @@ class SqliteStorageReader:
             has_scalars = connection.execute("SELECT EXISTS(SELECT 1 FROM scalars)").fetchone()[0]
             # Writers maintain this stamp in meta; it replaces four MAX(wall_time) scans.
             last_recorded = _loads(meta.get("last_recorded_at"), None)
+            try:
+                display_name = normalize_display_name(_loads(meta.get("display_name"), None))
+            except ValueError:
+                display_name = None
         return RunSummary(
             run_id=run_id,
             name=_loads(meta.get("name"), None),
@@ -317,6 +322,7 @@ class SqliteStorageReader:
             tags=tags,
             has_scalars=bool(has_scalars),
             last_recorded_at=last_recorded if last_recorded is not None and math.isfinite(last_recorded) else None,
+            display_name=display_name,
         )
 
     def update_run_tags(self, run_id, add, remove) -> list[str]:
@@ -326,6 +332,22 @@ class SqliteStorageReader:
         with closing(sqlite3.connect(f"{path.as_uri()}?mode=rw", uri=True, timeout=5)) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             return _update_tags(connection, add, remove)
+
+    def update_run_display_name(self, run_id, display_name) -> str | None:
+        path = self._run_db_path(run_id)
+        for suffix in ("-wal", "-shm", "-journal"):
+            resolve_log_path(self._logdir, run_id, "run.sqlite" + suffix)
+        display_name = normalize_display_name(display_name)
+        with closing(sqlite3.connect(f"{path.as_uri()}?mode=rw", uri=True, timeout=5)) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if display_name is None:
+                connection.execute("DELETE FROM meta WHERE key = 'display_name'")
+            else:
+                connection.execute(
+                    "INSERT OR REPLACE INTO meta(key, value) VALUES ('display_name', ?)",
+                    (_dump(display_name),),
+                )
+        return display_name
 
     def scalar_count(self, run_id, metric, step_min=None, step_max=None) -> int:
         path = self._run_db_path(run_id)

@@ -348,6 +348,20 @@ test("legend labels trim a shared prefix only when every result stays unique", (
   assert.equal(comparison.legendLabelMap([runs[0]], true).get("one"), "exp/run-a · local");
 });
 
+test("display names override labels and drive legend prefix trimming", () => {
+  const item = { ...run("one"), name: "baseline", display_name: "  Lower LR  ", source_label: "Peer" };
+  assert.equal(comparison.runName(item), "Lower LR");
+  assert.equal(comparison.runLabel(item), "Lower LR · Peer");
+  const runs = [
+    { ...run("one"), name: "exp/run-a", display_name: "Baseline A", source_label: "local" },
+    { ...run("two"), name: "exp/run-b", display_name: "Baseline B", source_label: "local" },
+  ];
+  const short = comparison.legendLabelMap(runs, true);
+  assert.equal(short.get("one"), "A · local");
+  assert.equal(short.get("two"), "B · local");
+  assert.equal(comparison.legendLabelMap([{ ...runs[0], display_name: null }], true).get("one"), "exp/run-a · local");
+});
+
 test("fast media results publish before a slow peer finishes", async () => {
   let release;
   const slow = new Promise((resolve) => { release = resolve; });
@@ -774,6 +788,25 @@ test("list sorting, compact charts, metric filtering and table time survive view
   assert.notEqual(viewStateKey(state), viewStateKey({ ...state, metric_filter: "" }));
 });
 
+test("run search matches display names, original names, IDs and sources", () => {
+  const item = { ...run("run-id"), name: "SwinIR_SRx2", display_name: "Lower LR", source_label: "Peer+1" };
+  for (const query of ["lower lr", "swinir", "run-id", "peer+1"]) {
+    assert.equal(selection.createRunSearch(query, false).matches(item), true, query);
+  }
+  assert.equal(selection.createRunSearch("^lower lr$", true).matches(item), true);
+  assert.equal(selection.createRunSearch("lower lr", false).matches({ ...item, display_name: null }), false);
+});
+
+test("name sorting uses display names before original names", () => {
+  const items = [
+    { ...run("b"), name: "raw-b", display_name: "Zulu" },
+    { ...run("a"), name: "raw-a", display_name: "Alpha" },
+    { ...run("c"), name: "Alpha", display_name: null },
+  ];
+  assert.deepEqual(selection.sortRuns(items, "name_asc").map(r => r.run_id), ["c", "a", "b"]);
+  assert.deepEqual(selection.sortRuns(items, "name_desc").map(r => r.run_id), ["b", "a", "c"]);
+});
+
 test("run search supports literal punctuation and case-insensitive regex across names, IDs and sources", () => {
   const item = { ...run("run-id"), name: "SwinIR_SRx2 (test)[1].log", source_label: "Peer+1" };
   assert.equal(selection.createRunSearch("(test)[1].", false).matches(item), true);
@@ -782,12 +815,12 @@ test("run search supports literal punctuation and case-insensitive regex across 
   assert.equal(selection.createRunSearch("SRx[24]", true).matches(item), true);
   const alternatives = selection.createRunSearch("swinir|hat", true);
   assert.equal(alternatives.matches(item), true);
-  assert.equal(alternatives.matches(item), true);
   assert.equal(alternatives.matches({ ...run("other"), name: "HAT_SRx4" }), true);
   assert.equal(alternatives.matches(run("unrelated")), false);
   assert.equal(selection.createRunSearch("swinir|hat", false).matches(item), false);
   assert.equal(selection.createRunSearch("", true).matches(item), true);
 });
+
 
 test("incomplete regular expressions return an error instead of throwing", () => {
   for (const pattern of ["[", "(", "\\"]) assert.ok(selection.createRunSearch(pattern, true).error);

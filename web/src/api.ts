@@ -1,6 +1,7 @@
 export interface RunSummary {
   run_id: string;
   name: string | null;
+  display_name?: string | null;
   started_at: number;
   has_scalars: boolean;
   last_recorded_at: number | null;
@@ -12,6 +13,7 @@ export interface RunSummary {
   note_excerpt?: string;
   tags?: string[];
   tags_writable?: boolean;
+  display_name_writable?: boolean;
   time_origin?: number | null;
   time_origin_kind?: "step_zero" | "first_sample" | null;
 }
@@ -54,6 +56,9 @@ export function fetchAudioPage(runId: string, name: string, step: number | null,
 }
 export function updateRunTags(runId: string, add: string[], remove: string[]): Promise<{ tags: string[] }> {
   return getJson(`/api/run-tags?${new URLSearchParams({ run_id: runId })}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ add, remove }) });
+}
+export function updateRunDisplayName(runId: string, displayName: string | null): Promise<{ display_name: string | null }> {
+  return getJson(`/api/run-display-name?${new URLSearchParams({ run_id: runId })}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ display_name: displayName }) });
 }
 export interface RunNote { body: string; updated_at: number | null; revision: number; writable: boolean }
 export function fetchImageNames(runId: string, signal?: AbortSignal): Promise<MediaNameSummary[]> { return getJson(`/api/image-names?${new URLSearchParams({ run_id: runId })}`, { signal }); }

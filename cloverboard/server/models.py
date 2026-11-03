@@ -5,12 +5,14 @@ import re
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from cloverboard.naming import MAX_DISPLAY_NAME, normalize_display_name
 from cloverboard.tags import normalize_tags
 
 
 class RunSummaryResponse(BaseModel):
     run_id: str
     name: str | None = None
+    display_name: str | None = None
     started_at: float = Field(description="Run creation time, Unix seconds.")
     config: dict[str, Any] = Field(default_factory=dict)
     source: str = "local"
@@ -22,6 +24,7 @@ class RunSummaryResponse(BaseModel):
     note_excerpt: str = ""
     tags: list[str] = Field(default_factory=list)
     tags_writable: bool = True
+    display_name_writable: bool = True
     has_scalars: bool = False
     last_recorded_at: float | None = Field(default=None, description="Latest scalar/image/audio recording time, Unix seconds.")
 
@@ -337,6 +340,19 @@ class ViewRename(BaseModel):
 class NoteInput(BaseModel):
     body: str = Field(max_length=20000)
     revision: int = Field(ge=0)
+
+
+class DisplayNameInput(BaseModel):
+    display_name: str | None = Field(default=None, max_length=MAX_DISPLAY_NAME)
+
+    @field_validator("display_name")
+    @classmethod
+    def valid_display_name(cls, value):
+        return normalize_display_name(value)
+
+
+class DisplayNameResponse(BaseModel):
+    display_name: str | None = None
 
 
 class TagUpdate(BaseModel):

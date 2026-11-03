@@ -1172,6 +1172,10 @@ body.column-resizing { user-select: none; }
 .tag-options .check-label { overflow-wrap: anywhere; }
 .tags-dialog { width: min(440px, calc(100vw - 28px)); max-height: calc(100dvh - 32px); overflow: auto; border: 1px solid var(--border); border-radius: 3px; padding: 20px; color: var(--text); background: var(--surface); box-shadow: var(--popover-shadow); }
 .tags-dialog::backdrop { background: #17253535; }
+.display-name-dialog { width: min(400px, calc(100vw - 28px)); max-height: calc(100dvh - 32px); overflow: auto; border: 1px solid var(--border); border-radius: 3px; padding: 20px; color: var(--text); background: var(--surface); box-shadow: var(--popover-shadow); }
+.display-name-dialog::backdrop { background: #17253535; }
+.display-name-label { display: block; margin-top: 18px; font-size: 12px; }
+.display-name-label .text-input { margin-top: 6px; }
 .run-filter-tags { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: 4px; max-height: 112px; overflow-y: auto; padding: 6px 0 0; scrollbar-width: thin; }
 .tag-filter-mode { color: var(--text-muted); font-size: 11px; }
 .filter-tag-name { min-width: 0; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

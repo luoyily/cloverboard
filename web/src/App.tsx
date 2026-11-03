@@ -20,6 +20,7 @@ import RunList from "./components/RunList";
 import TopBar from "./components/TopBar";
 import MediaPanel from "./components/MediaPanel";
 import TagsDialog from "./components/TagsDialog";
+import DisplayNameDialog from "./components/DisplayNameDialog";
 const RunDetailsDialog = lazy(() => import("./components/RunDetailsDialog"));
 const EMPTY_SUMMARIES = new Map<string, ScalarSummary>();
 
@@ -42,9 +43,10 @@ export default function App() {
   useEffect(() => { setLocateRequest(null); }, [state.search, state.search_regex, state.tag_filter, state.tag_filter_match]);
   const [appearance, setAppearance] = useState<RunSummary | null>(null);
   const [tagRuns, setTagRuns] = useState<RunSummary[] | null>(null);
+  const [displayNameRun, setDisplayNameRun] = useState<RunSummary | null>(null);
   const [baselineUndo, setBaselineUndo] = useState<string | null>(null);
   useEffect(() => {
-    setFocusedId(null); setAppearance(null); setDetailsRun(null); setTagRuns(null); setBaselineUndo(null);
+    setFocusedId(null); setAppearance(null); setDetailsRun(null); setTagRuns(null); setDisplayNameRun(null); setBaselineUndo(null);
   }, [workspace.contextVersion]);
   const [themeMode, setThemeMode] = useState<ThemeMode>(loadThemeMode);
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => resolveTheme(loadThemeMode()));
@@ -230,6 +232,14 @@ export default function App() {
     setDetailsRun((previous) => previous?.run.run_id === id ? { ...previous, run: { ...previous.run, tags } } : previous);
   }
 
+  function displayNameSaved(id: string, displayName: string | null) {
+    const replaceDisplayName = (items: RunSummary[]) => items.map(run => run.run_id === id ? { ...run, display_name: displayName } : run);
+    setRunCatalog(previous => previous ? { ...previous, runs: replaceDisplayName(previous.runs) } : previous);
+    setLocalRuns(replaceDisplayName);
+    setDetailsRun((previous) => previous?.run.run_id === id ? { ...previous, run: { ...previous.run, display_name: displayName } } : previous);
+    locateRun(id);
+  }
+
   let content;
   if (workspace.loadError || status === "error") {
     content = <div className="empty" role="alert"><h2>Unable to connect</h2><p>Make sure <code>cloverboard serve</code> is running, then refresh.</p></div>;
@@ -256,7 +266,7 @@ export default function App() {
 
   return <div className="app" style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
     <RunList runs={orderedRuns} selectedIds={selectedIds} colors={colors} onToggle={toggleRun} onBulkSelect={bulkSelect} onSelectOnly={selectOnly} sidebarWidth={sidebarWidth} onSidebarWidth={setSidebarWidth} filter={state.search} onFilterChange={(search) => update({ search })}
-      state={state} onChange={update} onEditTags={setTagRuns} locateRequest={locateRequest}
+      state={state} onChange={update} onEditTags={setTagRuns} onRename={setDisplayNameRun} locateRequest={locateRequest}
       baselineId={baselineId} focusedId={focusedId} onFocusRun={setFocusedId} onAppearance={setAppearance} onDetails={openDetails} onBaseline={setBaseline} />
     <div className="workspace">
       <TopBar themeMode={themeMode} onThemeToggle={() => setThemeMode((mode) => nextThemeMode(mode))}
@@ -280,5 +290,6 @@ export default function App() {
     {appearance && <RunAppearance key={appearance.run_id} run={appearance} runs={runs} selectedIds={selectedIds} settings={state.colors} colors={colors} theme={resolvedTheme} onChange={(colors) => update({ colors })} onClose={() => { setAppearance(null); setFocusedId(null); }} />}
     {detailsRun && <Suspense fallback={<div className="details-loading" role="status">Loading details…</div>}><RunDetailsDialog key={detailsRun.run.run_id} run={detailsRun.run} initialTab={detailsRun.tab} onEditTags={setTagRuns} onNoteSaved={() => setDataTick((tick) => tick + 1)} onClose={() => { setDetailsRun(null); setFocusedId(null); }} /></Suspense>}
     {tagRuns && <TagsDialog runs={tagRuns} onSaved={tagsSaved} onClose={() => setTagRuns(null)} />}
+    {displayNameRun && <DisplayNameDialog run={displayNameRun} onSaved={displayNameSaved} onClose={() => setDisplayNameRun(null)} />}
   </div>;
 }

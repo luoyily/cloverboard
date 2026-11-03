@@ -49,6 +49,8 @@ class RunSummary:
     tags_writable: bool = True
     has_scalars: bool = False
     last_recorded_at: float | None = None
+    display_name: str | None = None
+    display_name_writable: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +213,7 @@ class StorageReader(Protocol):
         """Return every run available in the logdir."""
 
     def update_run_tags(self, run_id: str, add: Sequence[str], remove: Sequence[str]) -> list[str]: ...
+    def update_run_display_name(self, run_id: str, display_name: str | None) -> str | None: ...
     def audio_names(self, run_id: str) -> list[MediaNameSummary]: ...
     def audio_timeline(self, run_id: str, name: str, max_steps: int = 200) -> MediaTimeline: ...
     def audio_page(self, run_id: str, name: str, step: int | None = None, limit: int = 12, offset: int = 0) -> AudioPage: ...

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { XIcon } from "@phosphor-icons/react";
 import type { RunSummary } from "../api";
+import { runName } from "../comparison";
 import { colorSeparation, paletteColor, SIMILAR_COLOR_DISTANCE, themeColor } from "../colors";
 import { runColorKey, type ColorSettings } from "../features";
 import type { ResolvedTheme } from "../theme";
@@ -31,7 +32,7 @@ export default function RunAppearance({ run, runs, selectedIds, settings, colors
     onClose();
   }
   return <dialog ref={dialog} className="appearance-dialog" aria-labelledby="appearance-title" onCancel={onClose} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-    <div className="dialog-title"><h2 id="appearance-title">Color · {run.name ?? run.run_id}</h2><button className="button icon-button" aria-label="Close color settings" onClick={onClose}><XIcon size={16} /></button></div>
+    <div className="dialog-title"><h2 id="appearance-title">Color · {runName(run)}</h2><button className="button icon-button" aria-label="Close color settings" onClick={onClose}><XIcon size={16} /></button></div>
     <div className="appearance-body settings-form">
         <span className="field-label">Recommended colors</span>
         <div className="color-choices">{choices.map(({ color }) => <button key={color} aria-label={`Use ${color}`} aria-pressed={custom.toLowerCase() === color.toLowerCase()} title={color} className="color-choice" style={{ background: themeColor(color, theme) }} onClick={() => choose(color)} />)}</div>
@@ -43,8 +44,8 @@ export default function RunAppearance({ run, runs, selectedIds, settings, colors
         </div>}
         {valid && <div className="color-preview"><span className="preview-light"><i style={{ background: themeColor(custom, "light") }} />Light</span><span className="preview-dark"><i style={{ background: themeColor(custom, "dark") }} />Dark</span></div>}
         <label className="checkbox-label"><input type="checkbox" checked={fixed} onChange={event => { setFixed(event.target.checked); setTouched(true); }} />Fix this color</label><p className="field-help">Fixed colors stay unchanged when reassigning colors or changing the palette or mode. Unfixing keeps the current color until the next reassignment.</p>
-        {conflicts.length > 0 && <p className="field-help" role="status">Also used by {conflicts.map((r) => r.name ?? r.run_id).join(", ")}.</p>}
-        {similar.length > 0 && <p className="field-help" role="status">Similar to {similar.map((r) => r.name ?? r.run_id).join(", ")}.</p>}
+        {conflicts.length > 0 && <p className="field-help" role="status">Also used by {conflicts.map(runName).join(", ")}.</p>}
+        {similar.length > 0 && <p className="field-help" role="status">Similar to {similar.map(runName).join(", ")}.</p>}
     </div>
     <div className="appearance-footer"><button className="button quiet-button" onClick={onClose}>Cancel</button><button className="button primary-button" disabled={!touched || !valid} onClick={apply}>Apply</button></div>
   </dialog>;

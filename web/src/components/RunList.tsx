@@ -7,6 +7,7 @@ import type { WorkspaceState } from "../workspace";
 import TagFilter, { TagFilterChips } from "./TagFilter";
 import Popover from "./Popover";
 import { createRunSearch, recentRunIds } from "../runSelection";
+import { runName } from "../comparison";
 import Checkbox from "./Checkbox";
 
 interface RunListProps {
@@ -23,6 +24,7 @@ interface RunListProps {
   state: WorkspaceState;
   onChange: (patch: Partial<WorkspaceState>) => void;
   onEditTags: (runs: RunSummary[]) => void;
+  onRename: (run: RunSummary) => void;
   baselineId: string | null;
   focusedId: string | null;
   onFocusRun: (id: string | null) => void;
@@ -40,7 +42,7 @@ export default function RunList({
   onBulkSelect, onSelectOnly, sidebarWidth, onSidebarWidth,
   filter,
   onFilterChange,
-  baselineId, focusedId, onFocusRun, locateRequest, onAppearance, onDetails, onBaseline, state, onChange, onEditTags,
+  baselineId, focusedId, onFocusRun, locateRequest, onAppearance, onDetails, onBaseline, state, onChange, onEditTags, onRename,
 }: RunListProps) {
   const checkboxPrefix = useId();
   const listRef = useRef<HTMLUListElement>(null);
@@ -73,7 +75,8 @@ export default function RunList({
   const selectedVisible = visibleIds.filter((id) => selectedIds.has(id)).length;
   const selectedRuns = runs.filter((run) => selectedIds.has(run.run_id));
   const hiddenSelected = selectedRuns.length - selectedVisible;
-  const filtering = (state.search_regex ? filter !== "" : filter.trim() !== "") || state.tag_filter.length > 0 || state.tag_filter_match === "empty";
+  const searchActive = state.search_regex ? filter !== "" : filter.trim() !== "";
+  const filtering = searchActive || state.tag_filter.length > 0 || state.tag_filter_match === "empty";
   const timeSort = state.run_sort.startsWith("started_");
   const SortArrow = state.run_sort.endsWith("desc") ? ArrowDownIcon : ArrowUpIcon;
   function menuAction(event: MouseEvent<HTMLButtonElement>, action: () => void) {
@@ -136,25 +139,30 @@ export default function RunList({
         <ul className="run-list" ref={listRef}>
           {visibleRuns.map((run) => {
             const selected = selectedIds.has(run.run_id);
+            const name = runName(run);
+            const originalName = run.name ?? run.run_id;
+            const aliased = Boolean(run.display_name?.trim()) && name !== originalName;
+            const metadata = aliased
+              ? `${searchActive ? `orig. ${originalName}` : "alias"}${run.source_label ? ` · @${run.source_label}` : ""}`
+              : run.source_label ? `@${run.source_label}` : "";
+            const title = `${name}${aliased ? `\nOriginal name: ${originalName}` : ""}\n${run.source_label ?? run.source}\n${run.run_id}`;
             return (
               <li key={run.run_id}>
                 <div ref={(element) => { if (element) rows.current.set(run.run_id, element); else rows.current.delete(run.run_id); }} className={`run-item${selected ? " selected" : ""}${focusedId === run.run_id || locatedId === run.run_id ? " run-focused" : ""}${locatedId === run.run_id ? " run-located" : ""}`} onClick={(event) => { if (event.target instanceof Element && !event.target.closest("button,input,label,details")) onToggle(run.run_id); }} onPointerEnter={() => onFocusRun(run.run_id)} onPointerLeave={() => onFocusRun(null)} onFocus={() => onFocusRun(run.run_id)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) onFocusRun(null); }}>
                   <label className="run-checkbox">
                     <Checkbox
                       id={`${checkboxPrefix}-${run.run_id}`}
-                      label={`Select ${run.name ?? run.run_id}`}
+                      label={`Select ${name}${aliased ? `, original name ${originalName}` : ""}`}
                       checked={selected}
                       onChange={() => onToggle(run.run_id)}
                     />
                   </label>
-                  <button className="run-swatch-button" type="button" aria-label={`Color for ${run.name ?? run.run_id}`} title="Change color" onClick={() => onAppearance(run)}><span className="swatch" style={{ background: colors.get(run.run_id) }} /></button>
-                  <label className="run-name" htmlFor={`${checkboxPrefix}-${run.run_id}`}
-                    title={`${run.name ?? run.run_id}\n${run.source_label ?? run.source}\n${run.run_id}`}
-                  >
-                    <span className="run-name-primary"><span>{run.name ?? run.run_id}</span>{baselineId === run.run_id && <span className="baseline-mark" title="Baseline" aria-label="Baseline">B</span>}</span>
-                    {run.source_label && <small className="run-source">@{run.source_label}</small>}
+                  <button className="run-swatch-button" type="button" aria-label={`Color for ${name}`} title="Change color" onClick={() => onAppearance(run)}><span className="swatch" style={{ background: colors.get(run.run_id) }} /></button>
+                  <label className="run-name" htmlFor={`${checkboxPrefix}-${run.run_id}`} title={title}>
+                    <span className="run-name-primary"><span>{name}</span>{baselineId === run.run_id && <span className="baseline-mark" title="Baseline" aria-label="Baseline">B</span>}</span>
+                    {metadata && <small className="run-source">{metadata}</small>}
                   </label>
-                  <RunActions run={run} baselineId={baselineId} onBaseline={onBaseline} onDetails={onDetails} onEditTags={onEditTags} />
+                  <RunActions run={run} baselineId={baselineId} onBaseline={onBaseline} onDetails={onDetails} onEditTags={onEditTags} onRename={onRename} />
                 </div>
               </li>
             );

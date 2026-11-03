@@ -184,7 +184,8 @@ class SourceReader:
                     runs.append(RunSummary(value.run_id, value.name, value.started_at, value.config,
                                            time_origin=value.time_origin, time_origin_kind=value.time_origin_kind, source_label=value.source_label,
                                            has_notes=value.has_notes, note_excerpt=value.note_excerpt, tags=value.tags, tags_writable=False,
-                                           has_scalars=value.has_scalars, last_recorded_at=value.last_recorded_at))
+                                           has_scalars=value.has_scalars, last_recorded_at=value.last_recorded_at,
+                                           display_name=value.display_name, display_name_writable=False))
             translated = [replace(run, run_id=qualify(source.key, run.run_id), source=source.key,
                                   source_label=source.label + (f" / {run.source_label}" if run.source_label else ""), source_online=True) for run in runs]
             online = True
@@ -336,6 +337,12 @@ class SourceReader:
         if source:
             raise PermissionError("Peer tags are read-only. Edit tags on the source instance.")
         return reader.update_run_tags(original, add, remove)
+
+    def update_run_display_name(self, run_id, display_name):
+        reader, source, original = self._resolve(run_id)
+        if source:
+            raise PermissionError("Peer display names are read-only. Edit the display name on its source instance.")
+        return reader.update_run_display_name(original, display_name)
 
     def audio_names(self, run_id):
         reader, source, original = self._resolve(run_id)

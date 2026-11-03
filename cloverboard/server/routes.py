@@ -46,11 +46,13 @@ def _run_rows(runs, writable):
         RunSummaryResponse(
             run_id=run.run_id,
             name=run.name,
+            display_name=run.display_name,
             started_at=run.started_at,
             config=run.config,
             source=run.source,
             has_notes=run.has_notes, note_excerpt=run.note_excerpt,
             tags=run.tags, tags_writable=run.tags_writable and writable,
+            display_name_writable=run.display_name_writable and writable,
             has_scalars=run.has_scalars, last_recorded_at=run.last_recorded_at,
             **({"source_label": run.source_label, "source_online": run.source_online} if run.source_label is not None else {}),
             **({"time_origin": run.time_origin, "time_origin_kind": run.time_origin_kind} if run.time_origin is not None and math.isfinite(run.time_origin) else {}),
