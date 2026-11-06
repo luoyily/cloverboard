@@ -104,12 +104,18 @@ Record, compare, aggregate, ask.
   named View. Zoom, pointer position, pinned readouts and playback position
   remain temporary; theme and sidebar width are browser preferences.
 
-Current viewing configuration saves automatically to the location selected in
-**Settings**: **Remote workspace** or **Local · this browser**. Normal access
-defaults to Remote; read-only and share access save locally. Views and palettes
-use the same location. Settings also provides JSON import/export for current
-configuration, Views and palettes, plus **Restore remote settings** in Local
-mode.
+Your current viewing session saves automatically in this browser. Targets,
+palettes and **Shared Views** come from the workspace; **My Views** stay
+personal to the browser. Saving a View offers **Save to workspace** — clear it
+to keep the View in My Views instead. A refresh always pulls the latest shared
+assets while keeping your current selection and unsaved tweaks, and read-only
+or share access can still save My Views locally. **Settings** imports and
+exports the session and My Views as JSON.
+
+Share links follow the View's scope: an unmodified Shared View uses a compact
+`?view=<id>` link that tracks later updates, while My Views and modified state
+embed a full snapshot in `#state=`. Settings export JSON when a snapshot would
+be too large for a URL.
 
 ## Aggregate and share
 
@@ -131,8 +137,8 @@ Separate multiple peers with commas. Add another local directory with
 is read-only. Restarting a shared server generates a new token.
 
 You can also open the shared board in a browser using the GPU machine's LAN
-address and `?token=TOKEN`. Viewers can edit and save their own local viewing
-configuration without changing the remote workspace or experiment data.
+address and `?token=TOKEN`. Viewers keep their own viewing session and My Views
+in the browser without changing the remote workspace or experiment data.
 
 ## Already using TensorBoard? Keep it.
 

@@ -96,10 +96,14 @@ cloverboard migrate --logdir ./runs --apply
   配色和 Chart/Table/Media 设置都可以保存为命名 View。
   缩放、光标位置、固定读数和播放进度属于临时交互；主题与侧栏宽度是浏览器偏好。
 
-当前观看配置会自动保存到 **Settings** 中选择的位置：**Remote workspace**（远程）
-或 **Local · this browser**（本地）。普通访问默认远程，只读与 share 访问保存到本地；
-View、调色板和 Targets 统一使用当前保存位置。总设置也提供当前配置、View、调色板和
-Targets 的 JSON 导入导出，本地模式还可通过 **Restore remote settings** 恢复远程观看配置。
+当前观看会话自动保存在本浏览器。Targets、调色板和 **Shared Views** 来自工作区；
+**My Views** 只属于当前浏览器。保存 View 时可勾选 **Save to workspace**，
+取消勾选则存入 My Views。刷新页面总会拉取最新共享资产，同时保留当前选择与未保存的调整；
+只读或 share 访问仍可在本地保存 My Views。**Settings** 提供会话与 My Views 的 JSON 导入导出。
+
+分享链接随 View 的作用域变化：未修改的 Shared View 生成精简的 `?view=<id>` 链接，
+会跟随该 View 的后续更新；My View 或已修改状态则在 `#state=` 中嵌入完整快照。
+快照超出 URL 容量时改用 JSON 导出。
 
 ## 聚合与分享
 
@@ -119,7 +123,7 @@ cloverboard serve --logdir ./runs --peers "gpu1=10.0.0.12:7230?token=TOKEN"
 Peer 聚合为一级，Peer 数据只读。分享服务重启后会生成新的 Token。
 
 也可以在浏览器中通过 GPU 机器的局域网地址和 `?token=TOKEN` 打开分享看板。
-查看者可以在本地编辑、保存自己的观看配置，不会改动远程工作区或实验数据。
+查看者的观看会话和 My Views 保存在自己的浏览器，不会改动远程工作区或实验数据。
 
 ## 已经在用 TensorBoard？可以继续用
 

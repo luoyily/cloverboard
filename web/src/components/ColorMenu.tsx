@@ -11,7 +11,7 @@ import Popover from "./Popover";
 import { MAX_PALETTES } from "../viewingConfig";
 import PaletteEditor from "./PaletteEditor";
 
-export default function ColorMenu({ runs, selectedIds, settings, theme, palettes, ready, onSavePalette, onDeletePalette, onChange }: { runs: RunSummary[]; selectedIds: Set<string>; settings: ColorSettings; theme: ResolvedTheme; palettes: CustomPalette[]; ready: boolean; onSavePalette: (input: PaletteInput, id?: string) => Promise<CustomPalette>; onDeletePalette: (id: string) => Promise<void>; onChange: (settings: ColorSettings) => void }) {
+export default function ColorMenu({ runs, selectedIds, settings, theme, palettes, ready, writable, onSavePalette, onDeletePalette, onChange }: { runs: RunSummary[]; selectedIds: Set<string>; settings: ColorSettings; theme: ResolvedTheme; palettes: CustomPalette[]; ready: boolean; writable: boolean; onSavePalette: (input: PaletteInput, id?: string) => Promise<CustomPalette>; onDeletePalette: (id: string) => Promise<void>; onChange: (settings: ColorSettings) => void }) {
   const [undo, setUndo] = useState<ColorUndo | null>(null);
   const [domainText, setDomainText] = useState<[string, string] | null>(null);
   const [error, setError] = useState("");
@@ -24,7 +24,7 @@ export default function ColorMenu({ runs, selectedIds, settings, theme, palettes
   const selectedRuns = runs.filter((run) => selectedIds.has(run.run_id));
   const otherRuns = runs.filter((run) => !selectedIds.has(run.run_id));
   const editablePalette = savedPalette;
-  const canCreate = ready && palettes.length < MAX_PALETTES;
+  const canCreate = ready && writable && palettes.length < MAX_PALETTES;
   const fields = [...new Set(runs.flatMap((r) => [...flattenConfig(r.config).keys()]))].sort();
   const numeric = fields.filter((field) => runs.some((r) => typeof parameterValue(r, field) === "number"));
   function patch(values: Partial<ColorSettings>) { onChange(recolorRuns(runs, { ...settings, ...values })); setUndo(null); setError(""); setDomainText(null); setConfirmDelete(false); }
@@ -74,7 +74,7 @@ export default function ColorMenu({ runs, selectedIds, settings, theme, palettes
           })}
         </div>
         <p className="field-help">{baseColors.length} base colors, with additional shades for more {settings.mode === "parameter" ? "families" : "runs"}. Colors adapt to light and dark backgrounds.</p>
-        <div className="palette-library-actions"><button className="button quiet-button" disabled={!canCreate || deleting} onClick={(event) => openEditor(event.currentTarget, false)}>{snapshotOnly ? "Save a copy" : "New palette"}</button>{editablePalette && <><button className="button quiet-button" disabled={!ready || deleting} onClick={(event) => openEditor(event.currentTarget, true)}>Edit</button><button className="button quiet-button" disabled={!ready || deleting} onClick={() => setConfirmDelete(!confirmDelete)}>Delete</button></>}</div>
+        <div className="palette-library-actions"><button className="button quiet-button" disabled={!canCreate || deleting} onClick={(event) => openEditor(event.currentTarget, false)}>{snapshotOnly ? "Save a copy" : "New palette"}</button>{writable && editablePalette && <><button className="button quiet-button" disabled={!ready || deleting} onClick={(event) => openEditor(event.currentTarget, true)}>Edit</button><button className="button quiet-button" disabled={!ready || deleting} onClick={() => setConfirmDelete(!confirmDelete)}>Delete</button></>}</div>
         {confirmDelete && savedPalette && <div className="settings-form palette-delete-confirm"><p className="field-help">Delete “{savedPalette.name}”? Current and saved Views keep their colors.</p><div className="inline-fields"><button className="button quiet-button" disabled={deleting} onClick={() => setConfirmDelete(false)}>Cancel</button><button className="button quiet-button" disabled={deleting} onClick={async () => {
           setDeleting(true); setError("");
           try { await onDeletePalette(savedPalette.id); setConfirmDelete(false); setUndo(null); }
@@ -82,7 +82,7 @@ export default function ColorMenu({ runs, selectedIds, settings, theme, palettes
           finally { setDeleting(false); }
         }}>{deleting ? "Deleting…" : "Confirm delete"}</button></div></div>}
         {snapshotOnly && <p className="field-help">This View uses a saved palette snapshot. Select a library palette to use its latest colors.</p>}
-        {!ready ? <p className="field-help">Loading palette library…</p> : !canCreate && <p className="field-help">Limit reached: {MAX_PALETTES} palettes.</p>}
+        {!ready ? <p className="field-help">Loading palette library…</p> : !writable ? <p className="field-help">Read-only workspace: the palette library cannot be changed.</p> : !canCreate && <p className="field-help">Limit reached: {MAX_PALETTES} palettes.</p>}
       </>}
       {settings.mode === "random" && <>
         <p className="field-help">Click a run’s swatch to edit or fix its color. Fixed colors survive palette and mode changes. Reassign optimizes the checked runs; unchecked runs only break ties.</p>

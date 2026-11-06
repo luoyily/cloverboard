@@ -7,9 +7,8 @@ import {
 import type { ReactNode } from "react";
 import type { ThemeMode } from "../theme";
 import type { SavedView, WorkspaceState } from "../workspace";
+import type { ActiveView, ViewScope } from "../viewingConfig";
 import type { TargetLibrary } from "../targets";
-import type { ViewingConfig } from "../viewingConfig";
-import type { SettingsMode } from "../workspaceSession";
 import ChartToolbar from "./ChartToolbar";
 import ViewMenu from "./ViewMenu";
 import ImageSettings from "./ImageSettings";
@@ -22,23 +21,21 @@ interface TopBarProps {
   onThemeToggle: () => void;
   onRefresh: () => void;
   state: WorkspaceState;
-  views: SavedView[];
   sharedViews: SavedView[];
-  config: ViewingConfig;
-  onImportConfig: (text: string) => Promise<void>;
-  onRestoreRemote: () => Promise<void>;
+  localViews: SavedView[];
+  activeView: ActiveView | null;
   writable: boolean;
-  mode: SettingsMode;
-  onMode: (mode: SettingsMode) => Promise<void>;
   ready: boolean;
   storageError: string;
   onChange: (patch: Partial<WorkspaceState>) => void;
   targets: TargetLibrary;
   onSaveTargets: (targets: TargetLibrary) => void;
-  onOpenView: (view: SavedView) => void;
-  onSaveView: (name: string, viewId?: string) => Promise<void>;
-  onDeleteView: (viewId: string) => Promise<void>;
-  onRenameView: (viewId: string, name: string) => Promise<void>;
+  onImportConfig: (text: string) => Promise<void>;
+  onOpenView: (view: SavedView, scope: ViewScope) => void;
+  onSaveView: (name: string, scope: ViewScope, viewId?: string) => Promise<void>;
+  onDeleteView: (scope: ViewScope, viewId: string) => Promise<void>;
+  onRenameView: (scope: ViewScope, viewId: string, name: string) => Promise<void>;
+  onPromoteView: (viewId: string) => Promise<void>;
   compareControls: ReactNode;
   colorControls: ReactNode;
   metrics: string[];
@@ -55,15 +52,16 @@ export default function TopBar({
   onThemeToggle,
   onRefresh,
   state,
-  views, sharedViews, config, onImportConfig, onRestoreRemote,
-  writable, mode, onMode,
+  sharedViews, localViews, activeView,
+  writable,
   ready,
   storageError,
   onChange,
   targets, onSaveTargets,
+  onImportConfig,
   onOpenView,
   onSaveView,
-  onDeleteView, onRenameView,
+  onDeleteView, onRenameView, onPromoteView,
   compareControls,
   colorControls, metrics,
 }: TopBarProps) {
@@ -94,11 +92,11 @@ export default function TopBar({
             }}
           >{panel === "charts" ? "Charts" : panel === "table" ? "Table" : "Media"}</button>)}
         </div>
-        <ViewMenu key={mode} state={state} views={views} sharedViews={sharedViews} ready={ready} onOpen={onOpenView} onSave={onSaveView} onDelete={onDeleteView} onRename={onRenameView} />
+        <ViewMenu state={state} sharedViews={sharedViews} localViews={localViews} activeView={activeView} writable={writable} ready={ready} onOpen={onOpenView} onSave={onSaveView} onDelete={onDeleteView} onRename={onRenameView} onPromote={onPromoteView} />
       </div>
       <div className="toolbar-right">
         {colorControls}
-        {state.panel !== "images" && <TargetsMenu metrics={metrics} targets={targets} onChange={onSaveTargets} />}
+        {state.panel !== "images" && <TargetsMenu metrics={metrics} targets={targets} editable={writable} onChange={onSaveTargets} />}
         {state.panel === "charts" ? <ChartToolbar
           metrics={metrics} topK={state.colors.top_k} onTopKChange={(top_k) => onChange({ colors: { ...state.colors, top_k } })}
           metricFilter={state.metric_filter} onMetricFilterChange={(metric_filter) => onChange({ metric_filter })}
@@ -120,7 +118,7 @@ export default function TopBar({
         <div className="toolbar-actions">
           {storageError && <span className="local-save-indicator" title={storageError} role="status" aria-label="Local settings could not be saved"><CloudSlashIcon size={15} aria-hidden="true" /></span>}
         <RefreshControl interval={state.refresh_interval} onRefresh={onRefresh} onInterval={(refresh_interval) => onChange({ refresh_interval })} />
-        <SettingsMenu mode={mode} writable={writable} ready={ready} config={config} onMode={onMode} onImport={onImportConfig} onRestore={onRestoreRemote}>
+        <SettingsMenu ready={ready} state={state} views={localViews} onImport={onImportConfig}>
           <button type="button" className="menu-item theme-menu-item" onClick={onThemeToggle} aria-label={`Change theme, current: ${THEME_LABELS[themeMode]}`}><ThemeIcon size={16} aria-hidden="true" /><span>Theme: {THEME_LABELS[themeMode]}</span></button>
         </SettingsMenu>
         </div>

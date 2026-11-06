@@ -1,26 +1,28 @@
 import { useEffect, useState } from "react";
 import { LinkIcon } from "@phosphor-icons/react";
 import { getJson } from "../api";
-import { encodeSharedState, viewStateKey, type SavedView, type WorkspaceState } from "../workspace";
+import type { SavedView, WorkspaceState } from "../workspace";
+import type { ActiveView } from "../viewingConfig";
+import { shareTarget } from "../share";
 
-export default function ShareLink({ state, views }: { state: WorkspaceState; views: SavedView[] }) {
+export default function ShareLink({ state, activeView, sharedViews }: { state: WorkspaceState; activeView: ActiveView | null; sharedViews: SavedView[] }) {
   const [link, setLink] = useState(""), [message, setMessage] = useState(""), [busy, setBusy] = useState(false);
-  useEffect(() => { setLink(""); setMessage(""); }, [state]);
+  useEffect(() => { setLink(""); setMessage(""); }, [state, activeView]);
   async function copy() {
     setBusy(true); setMessage("");
     try {
+      const target = shareTarget(state, activeView, sharedViews);
+      if (target.kind === "too-large") throw new Error("This view is too large for a link. Export your settings as JSON instead.");
       const url = new URL(window.location.href); url.search = ""; url.hash = "";
-      try { url.hash = new URLSearchParams({ state: encodeSharedState(state) }).toString(); }
-      catch (reason) {
-        const view = views.find((item) => item.view_id === state.active_view_id);
-        if (!view || viewStateKey(view.state) !== viewStateKey(state)) throw reason;
-        url.searchParams.set("view", view.view_id);
-      }
+      if (target.kind === "view") url.searchParams.set("view", target.viewId);
+      else url.hash = new URLSearchParams({ state: target.encoded }).toString();
       const { token } = await getJson<{ token: string | null }>("/api/share-token");
       if (token) url.searchParams.set("token", token);
       const address = url.toString(); setLink(address);
-      try { await navigator.clipboard.writeText(address); setMessage(url.searchParams.has("view") ? "Copied. This link follows saved View updates." : "Link copied."); }
-      catch { setMessage("Select and copy the link below."); }
+      try {
+        await navigator.clipboard.writeText(address);
+        setMessage(target.kind === "view" ? "Copied. This link follows the shared View and stays current." : "Link copied. It snapshots your current settings.");
+      } catch { setMessage("Select and copy the link below."); }
     } catch (reason) { setMessage(reason instanceof Error ? reason.message : "Unable to create link."); }
     finally { setBusy(false); }
   }

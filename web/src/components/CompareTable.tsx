@@ -33,6 +33,7 @@ interface CompareTableProps {
   colors: Map<string, string>;
   state: WorkspaceState;
   targets: TargetLibrary;
+  writable: boolean;
   onSaveTargets: (targets: TargetLibrary) => void;
   loading: boolean;
   onChange: (patch: Partial<WorkspaceState>) => void;
@@ -44,7 +45,7 @@ interface CompareTableProps {
   onEditTags: (runs: RunSummary[]) => void;
 }
 
-export default function CompareTable({ runs, configs, params, metrics, summaries, colors, state, targets, onSaveTargets, loading, onChange, focusedId, onFocusRun, onAppearance, onDetails, onBaseline, onEditTags }: CompareTableProps) {
+export default function CompareTable({ runs, configs, params, metrics, summaries, colors, state, targets, writable, onSaveTargets, loading, onChange, focusedId, onFocusRun, onAppearance, onDetails, onBaseline, onEditTags }: CompareTableProps) {
   const formatMetric = (value: number | null | undefined) => formatRecordedMetric(value, state.table_decimals);
   const sectionRef = useRef<HTMLElement>(null);
   const drag = useRef<{ pointerId: number; startX: number; startWidth: number; nextWidth: number } | null>(null);
@@ -161,7 +162,7 @@ export default function CompareTable({ runs, configs, params, metrics, summaries
           {hasTargetRow && <tr className="table-target-row" aria-label="Target reference values">
             <th scope="row" className="identity-column"><span className="target-reference-label"><TargetIcon size={16} />Target <small>Reference</small></span></th>
             {timeColumn && <td>—</td>}{state.show_tags_column && <td>—</td>}
-            {metrics.map((metric) => <td key={metric}><TargetCell metric={metric} group={targets[metric]} decimals={state.table_decimals} onChange={(group) => { const next = { ...targets }; if (group.items.length) next[metric] = group; else delete next[metric]; onSaveTargets(next); }} /></td>)}
+            {metrics.map((metric) => <td key={metric}><TargetCell metric={metric} group={targets[metric]} decimals={state.table_decimals} editable={writable} onChange={(group) => { const next = { ...targets }; if (group.items.length) next[metric] = group; else delete next[metric]; onSaveTargets(next); }} /></td>)}
             {visibleParams.map((param) => <td key={param.key}>—</td>)}
           </tr>}
           {sortedRuns.map((run) => <tr key={run.run_id} className={`${run.run_id === state.baseline_id ? "table-baseline-row " : ""}${focusedId === run.run_id ? "run-focused" : ""}`} onPointerEnter={() => onFocusRun(run.run_id)} onPointerLeave={() => onFocusRun(null)} onFocus={() => onFocusRun(run.run_id)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) onFocusRun(null); }}>

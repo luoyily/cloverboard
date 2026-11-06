@@ -663,11 +663,15 @@ button:disabled { cursor: default; opacity: 0.45; }
 .views-menu .menu-popover { max-height: calc(100dvh - 80px); overflow-y: auto; }
 .general-settings-menu .menu-popover { width: 300px; max-height: calc(100dvh - 80px); overflow-y: auto; }
 .config-transfer-actions { margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--border); }
-.settings-mode { display: grid; gap: 6px; padding: 4px 8px; font-size: 12px; color: var(--text-muted); }
 .theme-menu-item { justify-content: flex-start; gap: 8px; }
 .view-save-actions { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 4px; }
 .view-save-form { padding: 6px 8px; }
 .view-save-form label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--text-muted); }
+.view-share-choice { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.view-save-form .view-share-choice { display: flex; margin-bottom: 6px; }
+.view-share-choice input { margin: 0; accent-color: var(--accent); }
+.view-group-heading { padding: 8px 8px 4px; color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.view-group-heading + .menu-note { padding-top: 0; }
 .text-input { width: 100%; min-width: 0; height: 28px; border: 1px solid var(--input-border); border-radius: var(--radius); background: var(--surface); color: var(--text); padding: 0 8px; }
 /* Keep native select semantics and share styling across every settings menu. */
 select.text-input:not([multiple]) {

@@ -82,15 +82,16 @@ test("ordinary selection edits preserve offline choices; explicit replacement cl
   assert.deepEqual(replaceSelection(saved, ["another"]), { selected_ids: ["another"], baseline_id: null });
 });
 
-test("reconciliation changes only current selection fields, preserving colors and view identity", () => {
+test("reconciliation changes only current selection fields, preserving colors and other viewing settings", () => {
   const saved = state({
-    selected_ids: ["gpu:gone"], baseline_id: "gpu:gone", active_view_id: "saved-view",
+    selected_ids: ["gpu:gone"], baseline_id: "gpu:gone",
     colors: { runs: { "gpu:gone": { color: "#abcdef", fixed: true } } },
+    search: "keep me",
   });
   const before = structuredClone(saved);
   const patch = reconcileSelection(saved, { runs: [], sources: [status("gpu")] });
   assert.deepEqual(Object.keys(patch).sort(), ["baseline_id", "selected_ids"]);
   assert.deepEqual(saved, before);
   assert.deepEqual({ ...saved, ...patch }.colors, before.colors);
-  assert.equal({ ...saved, ...patch }.active_view_id, "saved-view");
+  assert.equal({ ...saved, ...patch }.search, "keep me");
 });

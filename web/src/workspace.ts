@@ -58,7 +58,6 @@ export interface WorkspaceState {
   hidden_params: string[];
   sort_column: string;
   sort_desc: boolean;
-  active_view_id: string | null;
   baseline_id: string | null;
   colors: ColorSettings;
 }
@@ -94,7 +93,6 @@ export function defaultWorkspaceState(): WorkspaceState {
     hidden_params: [],
     sort_column: "run",
     sort_desc: false,
-    active_view_id: null,
     baseline_id: null, colors: defaultColors(),
   };
 }
@@ -107,7 +105,6 @@ export function viewStateKey(state: WorkspaceState): string {
     hidden_params: [...current.hidden_params].sort(), collapsed_groups: [...current.collapsed_groups].sort(),
     tag_filter: [...current.tag_filter].sort(),
     expanded_charts: [...current.expanded_charts].sort(),
-    active_view_id: null,
   });
 }
 
@@ -124,7 +121,7 @@ export function normalizeState(state: Partial<WorkspaceState>): WorkspaceState {
   if (typeof next.differences_only !== "boolean") next.differences_only = true;
   if (typeof next.sort_column !== "string") next.sort_column = "run";
   if (typeof next.sort_desc !== "boolean") next.sort_desc = false;
-  next.active_view_id = typeof state.active_view_id === "string" ? state.active_view_id : null;
+  next.sort_desc = typeof state.sort_desc === "boolean" ? state.sort_desc : false;
   if (typeof next.search_regex !== "boolean") next.search_regex = false;
   if (!["started_desc", "started_asc", "name_asc", "name_desc"].includes(next.run_sort)) next.run_sort = "started_desc";
   if (typeof next.metric_filter !== "string") next.metric_filter = "";

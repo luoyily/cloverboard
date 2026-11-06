@@ -85,7 +85,7 @@ def reserve_ports(port: int) -> list[socket.socket]:
 
 
 def seed_workspace(directory: Path):
-    from cloverboard.server.models import SavedViewInput, WorkspaceSave, WorkspaceState
+    from cloverboard.server.models import SavedViewInput, TargetLibrarySave, WorkspaceSave, WorkspaceState
     from cloverboard.server.sources import qualify
     from cloverboard.server.workspace import WorkspaceStore
 
@@ -96,21 +96,21 @@ def seed_workspace(directory: Path):
         selected_ids=["baseline", "lower-lr", "partial-75", qualify("folder", "trial"), qualify("peer", "trial")],
         refresh_interval=0, collapsed_groups=["diagnostics", "optimizer"], baseline_id="baseline",
         metric_columns=["train/loss", "validation/score"],
-        targets={
-            "train/loss": {"items": [
-                {"id": "goal", "name": "Training goal", "chart_label": "Goal", "value": .1, "direction": "lte"},
-            ], "active_id": "goal"},
-            "validation/score": {"items": [
-                {"id": "small", "name": "Small model", "chart_label": "S", "value": .9, "direction": "gte"},
-                {"id": "large", "name": "Large model", "chart_label": "L", "value": .95, "direction": "gte"},
-            ], "active_id": "small"},
-        },
     )
-    view = store.save_view(SavedViewInput(name="Training overview", state=state))
+    store.save_view(SavedViewInput(name="Training overview", state=state))
     detail = state.model_copy(update={"collapsed_groups": ["diagnostics", "optimizer", "train"], "expanded_charts": ["validation/score"]})
     store.save_view(SavedViewInput(name="Validation detail", state=detail))
-    state.active_view_id = view.view_id
-    store.save_state(WorkspaceSave(state=state, saved_at=int(time.time() * 1000)))
+    saved_at = int(time.time() * 1000)
+    store.save_state(WorkspaceSave(state=state, saved_at=saved_at))
+    store.save_targets(TargetLibrarySave(saved_at=saved_at, targets={
+        "train/loss": {"items": [
+            {"id": "goal", "name": "Training goal", "chart_label": "Goal", "value": .1, "direction": "lte"},
+        ], "active_id": "goal"},
+        "validation/score": {"items": [
+            {"id": "small", "name": "Small model", "chart_label": "S", "value": .9, "direction": "gte"},
+            {"id": "large", "name": "Large model", "chart_label": "L", "value": .95, "direction": "gte"},
+        ], "active_id": "small"},
+    }))
 
 
 def serve_instance(role: str, directory: Path, port: int, peer_token: str | None, listener: socket.socket, ready):

@@ -297,6 +297,8 @@ class WorkspaceState(BaseModel):
     hidden_params: list[str] = Field(default_factory=list)
     sort_column: str = "run"
     sort_desc: bool = False
+    # Deprecated: the active View belongs to the browser session, not shared
+    # state. The field stays so payloads from older clients keep parsing.
     active_view_id: str | None = None
     baseline_id: str | None = None
     # Deprecated: targets live in the workspace-level target library. The field

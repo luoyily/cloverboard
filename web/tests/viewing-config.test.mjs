@@ -18,89 +18,92 @@ const workspace = await import(pathToFileURL(join(directory, "workspace.mjs")));
 const theme = await import(pathToFileURL(join(directory, "theme.mjs")));
 const { WorkspaceSession } = await import(pathToFileURL(join(directory, "workspaceSession.mjs")));
 const { availableSelection, reconcileSelection } = await import(pathToFileURL(join(directory, "runSelection.mjs")));
-const base = () => configModule.initialConfig(null);
+const normalize = (patch = {}) => workspace.normalizeState(patch);
+const view = (state, name = "Comparison", id = configModule.newViewId()) => ({ view_id: id, name, state: normalize(state) });
+function memoryStorage(memory = new Map()) {
+  return { getItem: key => memory.get(key) ?? null, setItem: (key, value) => memory.set(key, value), removeItem: key => memory.delete(key) };
+}
 function library() {
-  const { config, palette } = configModule.saveLocalPalette(base(), { name: "Ocean", colors: ["#3276b8", "#267f6c"] });
-  return configModule.saveLocalView({ ...config, state: { ...config.state, colors: { ...config.state.colors, palette: { kind: "custom", ...palette } } } }, "Comparison");
+  const state = normalize({ smoothing: .2 });
+  const saved = configModule.saveLocalView([], state, "Comparison");
+  return { state, views: saved.views };
 }
 
-test("local Views and palettes round-trip together through browser storage and JSON", () => {
-  const config = library(), memory = new Map();
-  const storage = { getItem: key => memory.get(key) ?? null, setItem: (key, value) => memory.set(key, value) };
-  const key = configModule.localConfigKey("workspace-a");
-  configModule.writeLocalConfig(storage, key, config);
-  assert.deepEqual(configModule.readLocalConfig(storage, key), config);
-  assert.deepEqual(configModule.parseConfigFile(configModule.exportConfig(config)), config);
-  assert.equal(configModule.readLocalConfig(storage, configModule.localConfigKey("workspace-b")), null);
-  assert.deepEqual(Object.keys(config.state.colors.runs), []);
+test("the session and My Views persist under independent workspace keys", () => {
+  const memory = new Map(), storage = memoryStorage(memory);
+  const state = normalize({ smoothing: .2 });
+  const saved = view(state, "Mine");
+  configModule.writeLocalViews(storage, configModule.localViewsKey("workspace-a"), [saved]);
+  const active = { scope: "local", view_id: saved.view_id, base_key: workspace.viewStateKey(state) };
+  configModule.writeSession(storage, configModule.sessionKey("workspace-a"), { version: 1, state, active_view: active });
+  assert.deepEqual(configModule.readLocalViews(storage, configModule.localViewsKey("workspace-a")), [saved]);
+  assert.deepEqual(configModule.readSession(storage, configModule.sessionKey("workspace-a")), { version: 1, state, active_view: active });
+  assert.equal(configModule.readLocalViews(storage, configModule.localViewsKey("workspace-b")), null);
+  assert.equal(configModule.readSession(storage, configModule.sessionKey("workspace-b")), null);
+  assert.equal(configModule.localViewsKey("workspace-a"), "cloverboard:views:local:workspace-a");
+  assert.equal(configModule.sessionKey("workspace-a"), "cloverboard:session:workspace-a");
 });
 
-test("import adds copies, handles case-insensitive name collisions and remaps palette references", () => {
-  const existing = library(), imported = configModule.mergeConfig(existing, existing);
-  const view = imported.views[1], palette = imported.palettes[1];
-  assert.equal(view.name, "Comparison (2)");
-  assert.equal(palette.name, "Ocean (2)");
-  assert.notEqual(view.view_id, existing.views[0].view_id);
-  assert.notEqual(palette.id, existing.palettes[0].id);
-  assert.equal(imported.state.active_view_id, view.view_id);
-  assert.equal(imported.state.colors.palette.id, palette.id);
-  assert.equal(view.state.colors.palette.id, palette.id);
-  assert.equal(workspace.viewStateKey(imported.state), workspace.viewStateKey(view.state));
-  assert.deepEqual(imported.views[0], existing.views[0]);
-  assert.deepEqual(configModule.parseConfigFile(configModule.exportConfig(imported)), imported);
+test("saving a My View replaces by id, rejects duplicate names and enforces the limit", () => {
+  const state = normalize({ smoothing: .2 });
+  const first = configModule.saveLocalView([], state, "  Mine  ");
+  assert.equal(first.view.name, "Mine");
+  assert.equal(first.baseKey, workspace.viewStateKey(state));
+  const updated = configModule.saveLocalView(first.views, { ...state, smoothing: .3 }, "Mine", first.view.view_id);
+  assert.equal(updated.views.length, 1);
+  assert.equal(updated.views[0].state.smoothing, .3);
+  assert.equal(updated.view.view_id, first.view.view_id);
+  assert.throws(() => configModule.saveLocalView(first.views, state, "mine"), /already exists/);
+  assert.throws(() => configModule.saveLocalView(first.views, state, "Mine", "0".repeat(32)), /not found/);
+  assert.throws(() => configModule.saveLocalView(first.views, state, " "), /between 1 and 80/);
+  const full = Array.from({ length: configModule.MAX_VIEWS }, (_, index) => (
+    { view_id: index.toString(16).padStart(32, "0"), name: `View ${index}`, state }
+  ));
+  assert.throws(() => configModule.saveLocalView(full, state, "Extra"), /Limit reached/);
 });
 
-test("import preserves historical palette snapshots even when the library was edited or deleted", () => {
-  const old = library();
-  const edited = configModule.saveLocalPalette(old, { name: "Ocean", colors: ["#9955af", "#c05a24"] }, old.palettes[0].id).config;
-  const imported = configModule.mergeConfig(base(), edited);
-  assert.deepEqual(imported.views[0].state.colors.palette.colors, old.palettes[0].colors);
-  assert.deepEqual(imported.palettes[0].colors, edited.palettes[0].colors);
-  assert.equal(imported.views[0].state.colors.palette.id, imported.palettes[0].id);
-  const withoutLibrary = configModule.mergeConfig(base(), { ...old, palettes: [] });
-  assert.equal(withoutLibrary.palettes.length, 0);
-  assert.deepEqual(withoutLibrary.state.colors.palette.colors, old.palettes[0].colors);
-  assert.equal(withoutLibrary.state.colors.palette.id, withoutLibrary.views[0].state.colors.palette.id);
+test("export and import cover only the session and My Views, including old export files", () => {
+  const state = normalize({ smoothing: .25, selected_ids: ["a"] });
+  const views = [view(state, "Mine")];
+  const file = JSON.parse(configModule.exportLocalFile(state, views));
+  assert.equal(file.format, "cloverboard-local-config");
+  assert.equal(file.version, 1);
+  assert.deepEqual(file.state, state);
+  assert.deepEqual(file.views, views);
+  assert.deepEqual(configModule.parseImportFile(JSON.stringify(file)), { state, views });
+  assert.deepEqual(configModule.parseImportFile(JSON.stringify({ format: "cloverboard-viewing-config", version: 1, state, views })), { state, views });
 });
 
-test("restoring remote settings replaces only the current view and its colors", () => {
-  const current = library();
-  const state = workspace.normalizeState({ smoothing: .2, metric_filter: "remote" });
-  const restored = configModule.restoreRemoteConfig(current, state);
-  assert.deepEqual(restored.state, state);
-  assert.deepEqual(restored.views, current.views);
-  assert.deepEqual(restored.palettes, current.palettes);
+test("imports copy Views with unique names and fresh identities", () => {
+  const mine = configModule.saveLocalView([], normalize(), "Comparison").views;
+  const incoming = [view({ smoothing: .4 }, "comparison"), view({}, "Other")];
+  const merged = configModule.mergeLocalViews(mine, incoming);
+  assert.deepEqual(merged.map(item => item.name), ["Comparison", "comparison (2)", "Other"]);
+  assert.equal(new Set(merged.map(item => item.view_id)).size, 3);
+  assert.equal(merged[1].state.smoothing, .4);
+  assert.throws(() => configModule.mergeLocalViews(mine, Array.from({ length: configModule.MAX_VIEWS }, () => view({}))), /exceed/);
 });
 
-test("local editing is independent of server writability and protects remote library entries", () => {
-  const config = library();
-  const changed = configModule.saveLocalView({ ...config, state: { ...config.state, smoothing: .1 } }, "Renamed", config.views[0].view_id);
-  assert.equal(changed.views.length, 1);
-  assert.equal(changed.views[0].state.smoothing, .1);
-  assert.throws(() => configModule.saveLocalView(config, "Remote", "remote-id"), /View not found/);
-  assert.throws(() => configModule.saveLocalPalette(config, { name: "Remote", colors: ["#123456", "#abcdef"] }, "remote-id"), /Palette not found/);
-  assert.throws(() => configModule.saveLocalView(config, "comparison"), /already exists/);
-  assert.throws(() => configModule.saveLocalPalette(config, { name: "ocean", colors: ["#123456", "#abcdef"] }), /already exists/);
-});
-
-test("invalid imports are rejected without changing existing libraries", () => {
-  const config = library(), before = structuredClone(config);
-  assert.throws(() => configModule.parseConfigFile("{"), /valid JSON/);
-  assert.throws(() => configModule.parseConfigFile('{"version":1}'), /CloverBoard/);
-  for (const patch of [{ version: 2 }, { views: {} }, { palettes: [null] }]) {
-    assert.throws(() => configModule.parseConfigFile(JSON.stringify({ format: "cloverboard-viewing-config", ...config, ...patch })));
-  }
-  for (const patch of [{ search: 42 }, { selected_ids: 7 }, { collapsed_groups: {} }, { colors: null }, { smoothing: 10 }, { chart_zoom: { loss: { x_min: 10, x_max: 1 } } }]) {
-    assert.throws(() => configModule.parseConfigFile(JSON.stringify({ format: "cloverboard-viewing-config", ...config, state: { ...config.state, ...patch } })), /viewing settings/);
-  }
-  assert.deepEqual(config, before);
+test("invalid session files and imports are rejected", () => {
+  assert.throws(() => configModule.parseImportFile("{"), /valid JSON/);
+  assert.throws(() => configModule.parseImportFile('{"version":1}'), /CloverBoard/);
+  assert.throws(() => configModule.parseImportFile(JSON.stringify({
+    format: "cloverboard-local-config", version: 1, state: normalize(),
+    views: [{ view_id: "not-a-view", name: "A", state: normalize() }],
+  })), /Invalid saved View/);
+  assert.throws(() => configModule.parseImportFile(JSON.stringify({
+    format: "cloverboard-local-config", version: 1, state: { ...normalize(), version: 2 }, views: [],
+  })), /viewing settings/);
+  assert.throws(() => configModule.parseImportFile(" ".repeat(configModule.MAX_CONFIG_BYTES + 1)), /2 MB/);
+  assert.throws(() => configModule.readSession({ getItem: () => "{" }, "key"));
+  assert.throws(() => configModule.readLocalViews({ getItem: () => "{" }, "key"));
 });
 
 test("storage failures propagate instead of pretending local data was saved", () => {
-  const config = library(), quotaError = new Error("QuotaExceededError");
-  assert.throws(() => configModule.writeLocalConfig({ setItem() { throw quotaError; } }, "key", config), error => error === quotaError);
-  assert.throws(() => configModule.readLocalConfig({ getItem() { throw new Error("storage disabled"); } }, "key"), /storage disabled/);
-  assert.throws(() => configModule.readLocalConfig({ getItem() { return "{"; } }, "key"));
+  const quotaError = new Error("QuotaExceededError");
+  assert.throws(() => configModule.writeSession({ setItem() { throw quotaError; } }, "key", { version: 1, state: normalize(), active_view: null }), error => error === quotaError);
+  assert.throws(() => configModule.writeLocalViews({ setItem() { throw quotaError; } }, "key", []), error => error === quotaError);
+  assert.throws(() => configModule.readSession({ getItem() { throw new Error("storage disabled"); } }, "key"), /storage disabled/);
   assert.match(configModule.STORAGE_ERROR, /Export JSON/);
 });
 
@@ -116,56 +119,29 @@ test("unavailable browser storage does not crash theme initialization or saving"
   }
 });
 
-test("large configurations use JSON while URL sharing points to the available export action", () => {
-  const config = { ...base(), state: workspace.normalizeState({ selected_ids: Array.from({ length: 1000 }, (_, index) => `experiment-${index}`) }) };
-  assert.throws(() => workspace.encodeSharedState(config.state), /Export.*JSON/);
-  assert.deepEqual(configModule.parseConfigFile(configModule.exportConfig(config)).state.selected_ids, config.state.selected_ids);
-  assert.throws(() => configModule.parseConfigFile(" ".repeat(configModule.MAX_CONFIG_BYTES + 1)), /smaller than 2 MB/);
-});
-
-test("imports enforce library limits and reject duplicate identities", () => {
-  const config = library();
-  assert.throws(() => configModule.parseConfig({ ...config, views: [...config.views, ...config.views] }), /Duplicate/);
-  assert.throws(() => configModule.parseConfig({ ...config, palettes: [...config.palettes, ...config.palettes] }), /Duplicate/);
-  const full = { ...config, views: Array.from({ length: configModule.MAX_VIEWS }, (_, index) => ({ ...config.views[0], view_id: String(index), name: String(index) })) };
-  assert.throws(() => configModule.mergeConfig(full, config), /exceed/);
-});
-
-test("imported colors and fixed flags persist inside the current state and named Views", () => {
-  const incoming = library();
-  incoming.state.colors.runs = { example: { color: "#123456", fixed: true } };
-  incoming.views[0].state.colors.runs = { example: { color: "#abcdef", fixed: false } };
-  const imported = configModule.mergeConfig(base(), incoming);
-  assert.deepEqual(configModule.parseConfigFile(configModule.exportConfig(imported)), imported);
-  assert.deepEqual(imported.state.colors.runs, incoming.state.colors.runs);
-  assert.deepEqual(imported.views[0].state.colors.runs, incoming.views[0].state.colors.runs);
-});
-
 function sessionFixture(t, writable = true, memory = new Map()) {
-  const remote = { workspace_id: "workspace-a", writable, saved_at: 1, state: workspace.defaultWorkspaceState(), views: [], target_library: { targets: {}, saved_at: 1 } };
-  const palettes = []; let serial = 0;
+  const remote = {
+    workspace_id: "workspace-a", writable, saved_at: 1,
+    state: workspace.defaultWorkspaceState(), views: [],
+    target_library: { targets: {}, saved_at: 1 },
+  };
+  const palettes = [];
+  let serial = 0;
   const writes = [], failures = new Set();
-  const storage = { getItem: key => memory.get(key) ?? null, setItem: (key, value) => memory.set(key, value) };
+  const storage = memoryStorage(memory);
   async function request(url, init = {}) {
     const method = init.method ?? "GET", body = init.body ? JSON.parse(init.body) : undefined;
     if (method === "GET") return structuredClone(url.endsWith("/palettes") ? palettes : remote);
     writes.push({ url, method, body });
     if (!writable || failures.has(url)) throw new Error("Request failed");
-    if (url.endsWith("/state")) { Object.assign(remote, body); return structuredClone(remote); }
     if (url.endsWith("/targets")) { remote.target_library = body; return structuredClone(remote.target_library); }
-    if (url.endsWith("/config")) {
-      remote.views = body.views; remote.state = body.state; remote.saved_at = body.saved_at;
-      remote.target_library = body.target_library;
-      palettes.splice(0, palettes.length, ...body.palettes);
-      return structuredClone(remote);
-    }
     const palette = url.includes("/palettes"), items = palette ? palettes : remote.views;
     const idField = palette ? "id" : "view_id";
     const id = method === "POST" ? (palette ? "custom:" : "") + (++serial).toString(16).padStart(32, "0") : decodeURIComponent(url.split("/").at(-1));
     const index = items.findIndex(item => item[idField] === id);
     if (method === "DELETE") return items.splice(index, 1)[0];
     const item = { ...(method === "PATCH" ? items[index] : {}), ...body, [idField]: id };
-    if (!palette) item.state = { ...workspace.normalizeState(item.state), active_view_id: null };
+    if (!palette) item.state = workspace.normalizeState(item.state);
     if (index < 0) items.push(item); else items[index] = item;
     return structuredClone(item);
   }
@@ -173,165 +149,6 @@ function sessionFixture(t, writable = true, memory = new Map()) {
   t.after(() => session.stop());
   return { session, remote, palettes, writes, failures, memory, storage, request };
 }
-
-test("normal mode defaults to remote autosave and remote View/palette CRUD", async t => {
-  const f = sessionFixture(t), { session } = f;
-  configModule.writeLocalConfig(f.storage, configModule.localConfigKey("workspace-a"), { ...library(), state: workspace.normalizeState({ smoothing: .1 }) });
-  await session.load("http://localhost/");
-  assert.equal(session.getSnapshot().mode, "remote");
-  assert.equal(session.getSnapshot().state.smoothing, .6);
-  session.update({ smoothing: .3 });
-  await session.flushRemote();
-  assert.equal(f.remote.state.smoothing, .3);
-  await session.saveView("Remote comparison");
-  const viewId = f.remote.views[0].view_id;
-  session.update({ smoothing: .4 });
-  await session.saveView("Remote comparison", viewId);
-  await session.renameView(viewId, "Renamed remote");
-  assert.equal(f.remote.views[0].state.smoothing, .4);
-  assert.equal(f.remote.views[0].name, "Renamed remote");
-  const palette = await session.savePalette({ name: "Remote ocean", colors: ["#123456", "#abcdef"] });
-  await session.savePalette({ name: "Changed remote", colors: ["#234567", "#abcdef"] }, palette.id);
-  assert.equal(f.palettes[0].name, "Changed remote");
-  await session.deleteView(viewId);
-  await session.deletePalette(palette.id);
-  await session.flushRemote();
-  assert.equal(f.remote.views.length, 0);
-  assert.equal(f.palettes.length, 0);
-  assert.equal(f.remote.state.active_view_id, null);
-  assert.equal(session.getSnapshot().local.views[0].name, "Comparison");
-});
-
-test("normal mode can keep browser changes separate and switching back reloads remote settings", async t => {
-  const f = sessionFixture(t), { session } = f;
-  await session.load("http://localhost/");
-  session.update({ smoothing: .3 });
-  await session.setMode("local");
-  session.update({ smoothing: .1 });
-  await session.saveView("Local comparison");
-  await session.savePalette({ name: "Local ocean", colors: ["#123456", "#abcdef"] });
-  await session.flushRemote();
-  assert.equal(f.remote.state.smoothing, .3);
-  assert.equal(f.writes.length, 1);
-  assert.equal(f.remote.views.length, 0);
-  assert.equal(f.palettes.length, 0);
-  const reloaded = new WorkspaceSession(f.request, () => f.storage);
-  t.after(() => reloaded.stop());
-  await reloaded.load("http://localhost/");
-  assert.equal(reloaded.getSnapshot().mode, "local");
-  assert.equal(reloaded.getSnapshot().state.smoothing, .1);
-  f.remote.state.smoothing = .7; f.remote.saved_at += 1;
-  await session.setMode("remote");
-  assert.equal(session.getSnapshot().state.smoothing, .7);
-  assert.equal(f.writes.length, 1);
-  await session.setMode("local");
-  assert.equal(session.getSnapshot().state.smoothing, .1);
-});
-
-test("readonly sessions save locally, protect remote libraries and restore remote without writes", async t => {
-  const f = sessionFixture(t, false), { session } = f;
-  f.remote.views.push({ view_id: "a".repeat(32), name: "Remote view", state: workspace.defaultWorkspaceState() });
-  await session.load("http://localhost/");
-  session.update({ smoothing: .2 });
-  session.update({ colors: { ...session.getSnapshot().state.colors, runs: { local: { color: "#abcdef", fixed: true } } } });
-  await session.saveView("Personal comparison");
-  await session.savePalette({ name: "Personal ocean", colors: ["#123456", "#abcdef"] });
-  await assert.rejects(session.setMode("remote"), /read-only/);
-  await session.renameView("a".repeat(32), "Local rename");
-  await session.deleteView("a".repeat(32));
-  await session.retryRemote();
-  const restarted = new WorkspaceSession(f.request, () => f.storage);
-  t.after(() => restarted.stop());
-  await restarted.load("http://localhost/");
-  assert.equal(restarted.getSnapshot().state.smoothing, .2);
-  assert.deepEqual(restarted.getSnapshot().state.colors.runs.local, { color: "#abcdef", fixed: true });
-  await session.restoreRemote();
-  assert.equal(session.getSnapshot().state.smoothing, .6);
-  assert.equal(session.getSnapshot().local.views.length, 1);
-  assert.equal(session.getSnapshot().local.palettes.length, 1);
-  assert.deepEqual(f.writes, []);
-});
-
-test("imports follow the explicit mode and never switch it implicitly", async t => {
-  const f = sessionFixture(t), { session } = f;
-  await session.load("http://localhost/");
-  await session.importConfig(configModule.exportConfig(library()));
-  assert.equal(session.getSnapshot().mode, "remote");
-  assert.equal(f.remote.views.length, 1);
-  assert.equal(f.palettes.length, 1);
-  assert.equal(f.writes.at(-1).url, "/api/workspace/config");
-  await session.setMode("local");
-  const writes = f.writes.length;
-  await session.importConfig(configModule.exportConfig(library()));
-  session.openView(session.getConfig().views[0]);
-  assert.equal(session.getSnapshot().mode, "local");
-  assert.equal(f.writes.length, writes);
-  assert.equal(session.getSnapshot().local.views.length, 1);
-});
-
-test("remote autosave failures keep a recoverable cache and retry independently of local state", async t => {
-  const f = sessionFixture(t), { session } = f;
-  await session.load("http://localhost/");
-  f.failures.add("/api/workspace/state");
-  session.update({ smoothing: .3 });
-  await session.flushRemote();
-  assert.match(session.getSnapshot().stateError, /remote workspace/);
-  assert.equal(f.remote.state.smoothing, .6);
-  session.stop();
-  f.failures.clear();
-  const restarted = new WorkspaceSession(f.request, () => f.storage);
-  t.after(() => restarted.stop());
-  await restarted.load("http://localhost/");
-  assert.equal(restarted.getSnapshot().state.smoothing, .3);
-  await restarted.setMode("local");
-  restarted.update({ smoothing: .1 });
-  await restarted.retryRemote();
-  assert.equal(f.remote.state.smoothing, .3);
-  assert.equal(restarted.getSnapshot().state.smoothing, .1);
-  assert.equal(restarted.getSnapshot().stateError, "");
-});
-
-test("failed remote library saves and unavailable browser storage do not pretend to succeed", async t => {
-  const f = sessionFixture(t), { session } = f;
-  await session.load("http://localhost/");
-  f.failures.add("/api/workspace/views");
-  await assert.rejects(session.saveView("Remote failure"), /Request failed/);
-  assert.equal(session.getSnapshot().remote.workspace.views.length, 0);
-  f.storage.setItem = () => { throw new Error("Quota exceeded"); };
-  session.update({ smoothing: .2 });
-  await session.flushRemote();
-  assert.equal(f.remote.state.smoothing, .2);
-  await assert.rejects(session.setMode("local"), /Could not save in this browser/);
-  assert.equal(session.getSnapshot().local.views.length, 0);
-  assert.equal(session.getSnapshot().mode, "remote");
-});
-
-test("pagehide drains a newer remote save while keeping local settings isolated", async t => {
-  const f = sessionFixture(t);
-  let release, started;
-  const gate = new Promise(resolve => { release = resolve; });
-  const first = new Promise(resolve => { started = resolve; });
-  let pause = true;
-  const session = new WorkspaceSession(async (url, init) => {
-    if (url.endsWith("/state") && pause) { pause = false; started(); await gate; }
-    return f.request(url, init);
-  }, () => f.storage);
-  t.after(() => session.stop());
-  await session.load("http://localhost/");
-  session.update({ smoothing: .2 });
-  const saving = session.flushRemote();
-  await first;
-  session.update({ smoothing: .3 });
-  const leaving = session.flushRemote(true);
-  release();
-  await Promise.all([saving, leaving]);
-  assert.equal(f.remote.state.smoothing, .3);
-  assert.equal(f.writes.length, 2);
-  await session.setMode("local");
-  session.update({ smoothing: .1 });
-  await session.flushRemote(true);
-  assert.equal(f.remote.state.smoothing, .3);
-});
 
 function watchingSettings() {
   return workspace.normalizeState({
@@ -349,28 +166,210 @@ function watchingSettings() {
   });
 }
 
-for (const mode of ["remote", "local", "readonly"]) test(`${mode}: all watching settings use the same autosave, View and JSON snapshot`, async t => {
-  const f = sessionFixture(t, mode !== "readonly"), { session } = f;
+test("loading keeps My Views and session state while refreshing shared assets", async t => {
+  const f = sessionFixture(t), { session } = f;
+  f.remote.views.push({ view_id: "a".repeat(32), name: "Shared comparison", state: normalize({ smoothing: .2 }) });
   await session.load("http://localhost/");
-  if (mode === "local") await session.setMode("local");
-  const expected = watchingSettings();
-  session.update(expected);
-  await session.flushRemote();
-  const version = session.getSnapshot().contextVersion;
-  await session.saveView("Watching settings");
-  assert.equal(session.getSnapshot().contextVersion, version); // Saving a name does not reset temporary UI.
-  const config = session.getConfig();
-  assert.deepEqual(config.views[0].state, expected);
-  const file = configModule.parseConfigFile(configModule.exportConfig(config));
-  assert.deepEqual({ ...file.state, active_view_id: null }, expected);
-  assert.deepEqual(file.views[0].state, expected);
-  if (mode === "remote") assert.deepEqual(f.remote.views[0].state, expected);
-  else assert.deepEqual(f.writes, []);
-  session.openView(config.views[0]);
-  assert.equal(session.getSnapshot().contextVersion, version + 1);
+  session.update({ smoothing: .15, selected_ids: ["run-1"] });
+  await session.saveView("Personal", "local");
+  f.palettes.push({ id: "custom:" + "b".repeat(32), name: "Ocean", colors: ["#123456", "#abcdef"] });
+  f.remote.target_library = {
+    targets: { loss: { items: [{ id: "goal", name: "Goal", chart_label: "G", value: .5, direction: "lte" }], active_id: "goal" } },
+    saved_at: 2,
+  };
+  f.remote.views[0] = { ...f.remote.views[0], name: "Shared comparison v2" };
+  const reloaded = new WorkspaceSession(f.request, () => f.storage);
+  t.after(() => reloaded.stop());
+  await reloaded.load("http://localhost/");
+  const snapshot = reloaded.getSnapshot();
+  assert.equal(snapshot.state.smoothing, .15);
+  assert.deepEqual(snapshot.state.selected_ids, ["run-1"]);
+  assert.deepEqual(snapshot.localViews.map(item => item.name), ["Personal"]);
+  assert.deepEqual(snapshot.sharedViews.map(item => item.name), ["Shared comparison v2"]);
+  assert.equal(snapshot.palettes.length, 1);
+  assert.equal(snapshot.targets.loss.items[0].id, "goal");
 });
 
-test("temporary interactions and browser preferences never affect saved settings or View dirty state", async t => {
+test("Refresh follows shared View edits only while the session is unmodified", async t => {
+  const f = sessionFixture(t);
+  const viewId = "a".repeat(32);
+  f.remote.views.push({ view_id: viewId, name: "Shared", state: normalize({ smoothing: .2 }) });
+  await f.session.load("http://localhost/");
+  f.session.openView(f.remote.views[0], "shared");
+  assert.equal(f.session.getSnapshot().activeView.scope, "shared");
+  f.remote.views[0].state = normalize({ smoothing: .4 });
+  const reloaded = new WorkspaceSession(f.request, () => f.storage);
+  t.after(() => reloaded.stop());
+  await reloaded.load("http://localhost/");
+  assert.equal(reloaded.getSnapshot().state.smoothing, .4);
+  assert.equal(reloaded.getSnapshot().activeView.base_key, workspace.viewStateKey(f.remote.views[0].state));
+  reloaded.update({ smoothing: .1 });
+  f.remote.views[0].state = normalize({ smoothing: .5 });
+  const third = new WorkspaceSession(f.request, () => f.storage);
+  t.after(() => third.stop());
+  await third.load("http://localhost/");
+  assert.equal(third.getSnapshot().state.smoothing, .1);
+  assert.equal(third.getSnapshot().activeView.view_id, viewId);
+});
+
+test("Shared View CRUD reaches the server while My Views stay in the browser", async t => {
+  const f = sessionFixture(t), { session } = f;
+  await session.load("http://localhost/");
+  session.update({ smoothing: .3 });
+  await session.saveView("Team view", "shared");
+  assert.equal(f.remote.views.length, 1);
+  assert.equal(f.writes[0].url, "/api/workspace/views");
+  assert.equal(f.writes[0].body.state.smoothing, .3);
+  assert.equal(session.getSnapshot().activeView.scope, "shared");
+  await session.saveView("My view", "local");
+  assert.equal(f.remote.views.length, 1);
+  assert.deepEqual(session.getSnapshot().localViews.map(item => item.name), ["My view"]);
+  assert.equal(session.getSnapshot().activeView.scope, "local");
+  const sharedId = f.remote.views[0].view_id, localId = session.getSnapshot().localViews[0].view_id;
+  await session.renameView("shared", sharedId, "Renamed team view");
+  await session.renameView("local", localId, "Renamed my view");
+  assert.deepEqual(f.writes.map(item => item.url), ["/api/workspace/views", `/api/workspace/views/${sharedId}`]);
+  assert.deepEqual(f.writes[1].body, { name: "Renamed team view" });
+  assert.equal(f.remote.views[0].name, "Renamed team view");
+  assert.equal(session.getSnapshot().localViews[0].name, "Renamed my view");
+  await session.deleteView("shared", sharedId);
+  assert.equal(f.remote.views.length, 0);
+  assert.equal(f.writes.at(-1).method, "DELETE");
+  assert.equal(session.getSnapshot().localViews.length, 1);
+});
+
+test("a read-only workspace saves the session and My Views but never writes server assets", async t => {
+  const f = sessionFixture(t, false), { session } = f;
+  await session.load("http://localhost/");
+  session.update({ smoothing: .25 });
+  await session.saveView("Personal", "local");
+  await assert.rejects(session.saveView("Team", "shared"), /read-only/);
+  await assert.rejects(session.savePalette({ name: "Ocean", colors: ["#123456", "#abcdef"] }), /read-only/);
+  const targets = { loss: { items: [{ id: "goal", name: "Goal", chart_label: "G", value: .5, direction: "lte" }], active_id: "goal" } };
+  await session.saveTargets(targets);
+  assert.match(session.getSnapshot().targetsError, /Could not save targets/);
+  assert.deepEqual(f.writes, []);
+  const reloaded = new WorkspaceSession(f.request, () => f.storage);
+  t.after(() => reloaded.stop());
+  await reloaded.load("http://localhost/");
+  assert.equal(reloaded.getSnapshot().state.smoothing, .25);
+  assert.deepEqual(reloaded.getSnapshot().localViews.map(item => item.name), ["Personal"]);
+  assert.deepEqual(reloaded.getSnapshot().targets, {});
+});
+
+test("Promote to Shared moves a My View onto the server", async t => {
+  const f = sessionFixture(t), { session } = f;
+  await session.load("http://localhost/");
+  session.update({ smoothing: .35 });
+  await session.saveView("Mine", "local");
+  const localId = session.getSnapshot().localViews[0].view_id;
+  await session.promoteView(localId);
+  const snapshot = session.getSnapshot();
+  assert.deepEqual(snapshot.localViews, []);
+  assert.equal(snapshot.sharedViews.length, 1);
+  assert.equal(snapshot.sharedViews[0].name, "Mine");
+  assert.equal(snapshot.activeView.scope, "shared");
+  assert.equal(snapshot.activeView.view_id, snapshot.sharedViews[0].view_id);
+  assert.equal(f.remote.views[0].state.smoothing, .35);
+  assert.deepEqual(f.writes.map(item => item.url), ["/api/workspace/views"]);
+  const reloaded = new WorkspaceSession(f.request, () => f.storage);
+  t.after(() => reloaded.stop());
+  await reloaded.load("http://localhost/");
+  assert.deepEqual(reloaded.getSnapshot().localViews, []);
+  assert.equal(reloaded.getSnapshot().sharedViews.length, 1);
+  assert.equal(reloaded.getSnapshot().activeView.scope, "shared");
+});
+
+test("import adds My Views and applies the session without touching shared assets", async t => {
+  const f = sessionFixture(t), { session } = f;
+  await session.load("http://localhost/");
+  const state = normalize({ smoothing: .2, search: "imported" });
+  const views = [view(state, "Imported")];
+  await session.importConfig(configModule.exportLocalFile(state, views));
+  assert.equal(session.getSnapshot().state.search, "imported");
+  assert.equal(session.getSnapshot().localViews[0].name, "Imported");
+  assert.equal(session.getSnapshot().activeView, null);
+  assert.deepEqual(f.writes, []);
+  const firstId = session.getSnapshot().localViews[0].view_id;
+  await session.importConfig(configModule.exportLocalFile(state, views));
+  assert.equal(session.getSnapshot().localViews.length, 2);
+  assert.equal(session.getSnapshot().localViews[1].name, "Imported (2)");
+  assert.notEqual(session.getSnapshot().localViews[1].view_id, firstId);
+});
+
+test("legacy browser configs migrate once into the session and My Views", async t => {
+  const f = sessionFixture(t);
+  const shared = { view_id: "a".repeat(32), name: "Shared", state: normalize({ smoothing: .2 }) };
+  const local = view({ smoothing: .3 }, "Local", "b".repeat(32));
+  f.remote.views.push(shared);
+  f.memory.set(configModule.legacyConfigKey("workspace-a"), JSON.stringify({
+    version: 1, palettes: [],
+    views: [local, shared],
+    state: { ...normalize({ smoothing: .4 }), active_view_id: local.view_id },
+  }));
+  for (const suffix of [":mode", ":remote"]) f.memory.set(configModule.legacyConfigKey("workspace-a") + suffix, "legacy");
+  await f.session.load("http://localhost/");
+  const snapshot = f.session.getSnapshot();
+  assert.equal(snapshot.state.smoothing, .4);
+  assert.deepEqual(snapshot.localViews.map(item => item.name), ["Local"]);
+  assert.deepEqual(snapshot.activeView, { scope: "local", view_id: local.view_id, base_key: workspace.viewStateKey(local.state) });
+  for (const suffix of ["", ":mode", ":remote"]) assert.equal(f.memory.has(configModule.legacyConfigKey("workspace-a") + suffix), false);
+  assert.ok(f.memory.has(configModule.sessionKey("workspace-a")));
+  assert.ok(f.memory.has(configModule.localViewsKey("workspace-a")));
+  assert.deepEqual(f.writes, []);
+});
+
+test("shared links reopen Views and state links snapshot without changing saved assets", async t => {
+  const f = sessionFixture(t), { session } = f;
+  const linkedView = { view_id: "a".repeat(32), name: "Linked", state: normalize({ smoothing: .2, panel: "table" }) };
+  f.remote.views.push(linkedView);
+  assert.equal(await session.load(`http://localhost/?view=${linkedView.view_id}`), true);
+  assert.equal(session.getSnapshot().state.panel, "table");
+  assert.deepEqual(session.getSnapshot().activeView, { scope: "shared", view_id: linkedView.view_id, base_key: workspace.viewStateKey(linkedView.state) });
+  const linkedState = normalize({ smoothing: .1, search: "link" });
+  assert.equal(await session.load(`http://localhost/#state=${workspace.encodeSharedState(linkedState)}`), true);
+  assert.equal(session.getSnapshot().state.search, "link");
+  assert.equal(session.getSnapshot().activeView, null);
+  await session.load(`http://localhost/?view=${"c".repeat(32)}`);
+  assert.match(session.getSnapshot().linkNotice, /unavailable/);
+});
+
+test("a deleted active Shared View stops being named after refresh", async t => {
+  const f = sessionFixture(t);
+  f.remote.views.push({ view_id: "a".repeat(32), name: "Gone", state: normalize({ smoothing: .2 }) });
+  await f.session.load("http://localhost/");
+  f.session.openView(f.remote.views[0], "shared");
+  f.remote.views = [];
+  const reloaded = new WorkspaceSession(f.request, () => f.storage);
+  t.after(() => reloaded.stop());
+  await reloaded.load("http://localhost/");
+  assert.equal(reloaded.getSnapshot().activeView, null);
+  assert.equal(reloaded.getSnapshot().state.smoothing, .2);
+});
+
+test("shared watching settings persist in the session and both View scopes", async t => {
+  const f = sessionFixture(t), { session } = f;
+  await session.load("http://localhost/");
+  const expected = watchingSettings();
+  session.update(expected);
+  const version = session.getSnapshot().contextVersion;
+  await session.saveView("Team watching", "shared");
+  assert.equal(session.getSnapshot().contextVersion, version);
+  assert.deepEqual(f.remote.views[0].state, expected);
+  await session.saveView("My watching", "local");
+  assert.deepEqual(session.getSnapshot().localViews[0].state, expected);
+  const file = configModule.parseImportFile(configModule.exportLocalFile(session.getSnapshot().state, session.getSnapshot().localViews));
+  assert.deepEqual(file.state, expected);
+  assert.deepEqual(file.views[0].state, expected);
+  session.openView(f.remote.views[0], "shared");
+  assert.equal(session.getSnapshot().contextVersion, version + 1);
+  const reloaded = new WorkspaceSession(f.request, () => f.storage);
+  t.after(() => reloaded.stop());
+  await reloaded.load("http://localhost/");
+  assert.deepEqual(reloaded.getSnapshot().state, expected);
+});
+
+test("temporary interactions never enter the session, Views or imports", async t => {
   const f = sessionFixture(t), { session } = f;
   await session.load("http://localhost/");
   const viewing = watchingSettings();
@@ -378,109 +377,106 @@ test("temporary interactions and browser preferences never affect saved settings
   assert.equal(workspace.viewStateKey(interacting), workspace.viewStateKey(viewing));
   assert.deepEqual(workspace.readSharedLocation(`http://localhost/#state=${workspace.encodeSharedState(interacting)}`).state, viewing);
   session.update(interacting);
-  await session.flushRemote();
-  assert.deepEqual(f.remote.state, viewing);
-  await session.saveView("Clean snapshot");
+  await session.saveView("Clean snapshot", "shared");
   assert.deepEqual(f.remote.views[0].state, viewing);
-  const file = JSON.parse(configModule.exportConfig(session.getConfig()));
+  assert.deepEqual(configModule.readSession(f.storage, configModule.sessionKey("workspace-a")).state, viewing);
+  const file = JSON.parse(configModule.exportLocalFile(session.getSnapshot().state, session.getSnapshot().localViews));
   for (const key of ["chart_zoom", "hoverStep", "pinned", "theme", "sidebarWidth", "mode", "contextVersion"]) assert.equal(Object.hasOwn(file.state, key), false);
 });
 
-test("saving a palette only changes its library in either mode", async t => {
+test("the target library saves independently and never enters Views or session state", async t => {
   const f = sessionFixture(t), { session } = f;
   await session.load("http://localhost/");
-  for (const mode of ["remote", "local"]) {
-    await session.setMode(mode);
-    const before = structuredClone(session.getSnapshot().state);
-    await session.savePalette({ name: "Ocean", colors: ["#123456", "#abcdef"] });
-    assert.deepEqual(session.getSnapshot().state, before);
-    assert.equal(session.getConfig().palettes[0].name, "Ocean");
-  }
+  const before = structuredClone(session.getSnapshot().state);
+  const targets = { loss: { items: [{ id: "goal", name: "Goal", chart_label: "G", value: .5, direction: "lte" }], active_id: "goal" } };
+  await session.saveTargets(targets);
+  assert.deepEqual(f.remote.target_library.targets, targets);
+  assert.deepEqual(session.getSnapshot().state, before);
+  await session.saveView("With targets", "shared");
+  assert.equal(Object.hasOwn(f.remote.views[0].state, "targets"), false);
+  session.openView(f.remote.views[0], "shared");
+  assert.deepEqual(session.getSnapshot().targets, targets);
+  f.failures.add("/api/workspace/targets");
+  await session.saveTargets({});
+  assert.match(session.getSnapshot().targetsError, /Could not save targets/);
+  assert.deepEqual(session.getSnapshot().targets, {});
 });
 
-test("targets are a workspace library that survives View switches in either mode", async t => {
+test("saving a palette only changes the shared palette library", async t => {
   const f = sessionFixture(t), { session } = f;
   await session.load("http://localhost/");
-  for (const mode of ["remote", "local"]) {
-    await session.setMode(mode);
-    const before = structuredClone(session.getSnapshot().state);
-    const library = { score: { items: [{ id: "goal", name: "Goal", chart_label: "G", value: .9, direction: "gte" }], active_id: "goal" } };
-    await session.saveTargets(library);
-    assert.deepEqual(session.getSnapshot().state, before); // The library never enters viewing state.
-    assert.deepEqual(session.getConfig().targets, library);
-    await session.saveView("With targets");
-    assert.equal(Object.hasOwn(session.getConfig().views[0].state, "targets"), false);
-    session.openView(session.getConfig().views[0]);
-    assert.deepEqual(session.getSnapshot().targets, library); // Switching Views keeps the library.
-    if (mode === "remote") assert.deepEqual(f.remote.target_library.targets, library);
-  }
+  const before = structuredClone(session.getSnapshot().state);
+  const palette = await session.savePalette({ name: "Ocean", colors: ["#123456", "#abcdef"] });
+  assert.deepEqual(session.getSnapshot().state, before);
+  assert.deepEqual(session.getSnapshot().palettes, [palette]);
+  await session.savePalette({ name: "Ocean v2", colors: ["#234567", "#abcdef"] }, palette.id);
+  assert.equal(session.getSnapshot().palettes[0].name, "Ocean v2");
+  await session.deletePalette(palette.id);
+  assert.deepEqual(session.getSnapshot().palettes, []);
 });
 
-test("legacy per-View targets are hoisted into the library when a local config is read", () => {
-  const target = { id: "goal", name: "Goal", chart_label: "G", value: .9, direction: "gte" };
-  const group = { items: [target], active_id: target.id };
-  const legacy = {
-    version: 1, palettes: [],
-    views: [{ view_id: "a".repeat(32), name: "Old", state: { ...workspace.defaultWorkspaceState(), targets: { loss: group } } }],
-    state: { ...workspace.defaultWorkspaceState(), targets: { score: group } },
-  };
-  const config = configModule.parseConfig(legacy);
-  assert.deepEqual(config.targets, { loss: group, score: group });
-  assert.equal(Object.hasOwn(config.state, "targets"), false);
-  assert.equal(Object.hasOwn(config.views[0].state, "targets"), false);
-  assert.deepEqual(configModule.parseConfigFile(configModule.exportConfig(config)), config);
-});
-
-for (const mode of ["remote", "local", "readonly"]) test(`${mode}: confirmed run cleanup saves current settings without rewriting Views or palettes`, async t => {
-  const f = sessionFixture(t, mode !== "readonly"), { session } = f;
-  const selected = ["gpu:gone", "offline:kept", "present"];
-  const original = workspace.normalizeState({
-    selected_ids: selected, baseline_id: "gpu:gone", active_view_id: "a".repeat(32),
+test("reconciling runs writes only the session and leaves every View untouched", async t => {
+  const f = sessionFixture(t), { session } = f;
+  const original = normalize({
+    selected_ids: ["gpu:gone", "offline:kept", "present"], baseline_id: "gpu:gone",
     colors: { ...workspace.defaultWorkspaceState().colors, runs: { "gpu:gone": { color: "#abcdef", fixed: true } } },
   });
+  const savedView = { view_id: "a".repeat(32), name: "Saved comparison", state: original };
   f.remote.state = original;
-  f.remote.views.push({ view_id: "a".repeat(32), name: "Saved comparison", state: { ...structuredClone(original), active_view_id: null } });
+  f.remote.views.push(savedView);
   f.palettes.push({ id: "custom:" + "b".repeat(32), name: "Ocean", colors: ["#abcdef", "#3276b8"] });
   await session.load("http://localhost/");
-  if (mode === "local") await session.setMode("local");
-  const before = structuredClone(session.getConfig());
-  const present = { run_id: "present", source: "local", started_at: 1, has_scalars: true };
+  session.openView(f.remote.views[0], "shared");
   const catalog = {
-    runs: [present],
+    runs: [{ run_id: "present", source: "local", started_at: 1, has_scalars: true }],
     sources: [
       { source_id: "local", label: "Local", kind: "local", online: true },
       { source_id: "gpu", label: "GPU", kind: "peer", online: false },
       { source_id: "offline", label: "Offline", kind: "peer", online: false },
     ],
   };
-
-  // A failed source is hidden, but cannot erase saved remote or browser choices.
   assert.equal(availableSelection(session.getSnapshot().state, catalog.runs).size, 1);
   assert.equal(reconcileSelection(session.getSnapshot().state, catalog), null);
-  await session.flushRemote();
   assert.deepEqual(f.writes, []);
-
   catalog.sources[1].online = true;
   const patch = reconcileSelection(session.getSnapshot().state, catalog);
   assert.deepEqual(patch, { selected_ids: ["offline:kept", "present"], baseline_id: null });
   session.update(patch);
-  await session.flushRemote();
-  const current = session.getConfig();
-  assert.deepEqual(current.state.selected_ids, ["offline:kept", "present"]);
-  assert.equal(current.state.baseline_id, null);
-  assert.deepEqual(current.state.colors, before.state.colors);
-  assert.deepEqual(current.views, before.views);
-  assert.deepEqual(current.palettes, before.palettes);
-  assert.equal(reconcileSelection(current.state, catalog), null);
-  if (mode === "remote") {
-    assert.equal(f.writes.length, 1);
-    assert.equal(f.writes[0].url, "/api/workspace/state");
-    assert.deepEqual(f.remote.state, current.state);
-    assert.deepEqual(f.remote.views, before.views);
-  } else {
-    assert.deepEqual(f.writes, []);
-    assert.deepEqual(f.remote.state, original);
-    const stored = configModule.readLocalConfig(f.storage, configModule.localConfigKey("workspace-a"));
-    assert.deepEqual(stored, current);
-  }
+  assert.deepEqual(f.writes, []);
+  const stored = configModule.readSession(f.storage, configModule.sessionKey("workspace-a"));
+  assert.deepEqual(stored.state.selected_ids, ["offline:kept", "present"]);
+  assert.equal(stored.state.baseline_id, null);
+  assert.deepEqual(stored.state.colors, original.colors);
+  assert.deepEqual(f.remote.state, original);
+  assert.deepEqual(f.remote.views, [savedView]);
+  assert.equal(f.palettes.length, 1);
+  const reloaded = new WorkspaceSession(f.request, () => f.storage);
+  t.after(() => reloaded.stop());
+  await reloaded.load("http://localhost/");
+  assert.deepEqual(reloaded.getSnapshot().state.selected_ids, ["offline:kept", "present"]);
+  assert.equal(reloaded.getSnapshot().state.baseline_id, null);
+  assert.deepEqual(reloaded.getSnapshot().state.colors, original.colors);
+});
+
+test("corrupt browser data falls back to shared assets but reports the read failure", async t => {
+  const f = sessionFixture(t);
+  f.memory.set(configModule.sessionKey("workspace-a"), "{");
+  await f.session.load("http://localhost/");
+  const snapshot = f.session.getSnapshot();
+  assert.equal(snapshot.ready, true);
+  assert.match(snapshot.storageError, /Could not restore/);
+  assert.deepEqual(snapshot.localViews, []);
+  assert.equal(snapshot.state.smoothing, .6);
+});
+
+test("storage write failures reject My View saves and can be retried", async t => {
+  const f = sessionFixture(t), { session } = f;
+  await session.load("http://localhost/");
+  f.storage.setItem = () => { throw new Error("Quota exceeded"); };
+  await assert.rejects(session.saveView("Cannot save", "local"), /Could not save in this browser/);
+  assert.match(session.getSnapshot().storageError, /Could not save/);
+  assert.deepEqual(session.getSnapshot().localViews, []);
+  f.storage.setItem = (key, value) => f.memory.set(key, value);
+  session.retryStorage();
+  assert.equal(session.getSnapshot().storageError, "");
 });

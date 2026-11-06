@@ -72,13 +72,13 @@ test("named targets normalize invalid references and never travel inside shared 
   const state = normalizeState({});
   assert.equal(readSharedLocation(`http://localhost/#state=${encodeSharedState(state)}`).state.targets, undefined);
   assert.equal(viewStateKey(normalizeState({ targets: { loss: group } })), viewStateKey(state));
-  // Configs saved before the move hoist legacy per-View targets on read.
-  const config = configModule.parseConfig({
-    version: 1, palettes: [],
+  // Configs saved before the move drop legacy per-View targets on read.
+  const legacy = configModule.parseLegacyConfig({
+    version: 1,
     views: [{ view_id: "a".repeat(32), name: "Old", state: { ...defaultWorkspaceState(), targets: { loss: group } } }],
     state: { ...defaultWorkspaceState() },
   });
-  assert.deepEqual(config.targets.loss, group);
+  assert.equal(Object.hasOwn(legacy.views[0].state, "targets"), false);
   const invalid = targets.normalizeTargets({ loss: { items: [target, { ...target }, { ...target, id: "bad", value: Infinity }], active_id: "bad" } });
   assert.deepEqual(invalid.loss, { items: [target], active_id: null });
   assert.deepEqual(targets.normalizeTargets({ loss: { items: [], active_id: null } }), {});
@@ -406,13 +406,14 @@ test("tag filters preserve exact membership for any, all, none and empty modes",
 });
 
 test("media and table settings survive views and shared state", () => {
-  const state = normalizeState({ ...defaultWorkspaceState(), panel: "images", media_type: "audio", audio_step: 0, table_decimals: 7, show_tags_column: true, tag_filter: ["reviewed"], tag_filter_match: "all", table_show_steps: false, table_delta: "hidden", baseline_id: "r1", targets: { loss: { items: [{ id: "goal", name: "Training goal", chart_label: "Goal", value: .2, direction: "lte" }], active_id: "goal" } } });
+  const state = normalizeState({ ...defaultWorkspaceState(), panel: "images", media_type: "audio", audio_step: 0, table_decimals: 7, show_tags_column: true, tag_filter: ["reviewed"], tag_filter_match: "all", table_show_steps: false, table_delta: "hidden", baseline_id: "r1" });
   const shared = readSharedLocation(`http://localhost/#state=${encodeSharedState(state)}`);
   assert.equal(shared.state.media_type, "audio");
   assert.equal(shared.state.audio_step, 0);
   assert.equal(shared.state.table_decimals, 7);
   assert.deepEqual(shared.state.tag_filter, ["reviewed"]);
-  for (const key of ["table_show_steps", "table_delta", "baseline_id", "targets"]) assert.deepEqual(shared.state[key], state[key]);
+  for (const key of ["table_show_steps", "table_delta", "baseline_id"]) assert.deepEqual(shared.state[key], state[key]);
+  assert.equal(Object.hasOwn(shared.state, "targets"), false);
   assert.notEqual(viewStateKey(state), viewStateKey({ ...state, table_show_steps: true }));
 });
 

@@ -257,7 +257,7 @@ export default function App() {
   } else if (state.panel === "images") {
     content = <MediaPanel key={`${workspace.contextVersion}:${state.media_type}`} workspaceId={workspace.workspaceId} runs={selectedRuns} state={state} colors={colors} refreshTick={pollTick + dataTick} onChange={update} />;
   } else if (state.panel === "table") {
-    content = <CompareTable runs={selectedRuns} configs={configs} params={params} metrics={chosenMetrics} summaries={visibleSummaries} colors={colors} state={displayState} targets={targets} onSaveTargets={workspace.saveTargets}
+    content = <CompareTable runs={selectedRuns} configs={configs} params={params} metrics={chosenMetrics} summaries={visibleSummaries} colors={colors} state={displayState} targets={targets} writable={workspace.writable} onSaveTargets={workspace.saveTargets}
       loading={(!metrics.length && !catalogReady) || loadedSummary !== summaryKey} onChange={update} focusedId={focusedId} onFocusRun={setFocusedId} onAppearance={setAppearance} onDetails={openDetails} onBaseline={setBaseline} onEditTags={setTagRuns} />;
   } else if (!metricFields.length && !catalogReady) {
     content = <div className="empty" role="status">Loading metrics…</div>;
@@ -272,14 +272,13 @@ export default function App() {
     <div className="workspace">
       <TopBar themeMode={themeMode} onThemeToggle={() => setThemeMode((mode) => nextThemeMode(mode))}
         onRefresh={() => { setDataTick((tick) => tick + 1); if (workspace.loadError) workspace.retry(); }}
-        state={state} views={workspace.views} sharedViews={workspace.sharedViews} writable={workspace.writable} ready={ready} storageError={workspace.storageError} config={workspace.config} mode={workspace.mode} onMode={workspace.setMode} onImportConfig={workspace.importConfig} onRestoreRemote={workspace.restoreRemote}
-        onChange={update} targets={targets} onSaveTargets={workspace.saveTargets} onOpenView={workspace.openView} onSaveView={workspace.saveView} onDeleteView={workspace.deleteView} onRenameView={workspace.renameView}
+        state={state} sharedViews={workspace.sharedViews} localViews={workspace.localViews} activeView={workspace.activeView} writable={workspace.writable} ready={ready} storageError={workspace.storageError} onImportConfig={workspace.importConfig}
+        onChange={update} targets={targets} onSaveTargets={workspace.saveTargets} onOpenView={workspace.openView} onSaveView={workspace.saveView} onDeleteView={workspace.deleteView} onRenameView={workspace.renameView} onPromoteView={workspace.promoteView}
         metrics={metrics}
-        colorControls={<ColorMenu key={workspace.contextVersion} runs={runs} selectedIds={selectedIds} settings={state.colors} theme={resolvedTheme} palettes={workspace.palettes} ready={ready} onSavePalette={workspace.savePalette} onDeletePalette={workspace.deletePalette} onChange={(colors) => update({ colors })} />}
+        colorControls={<ColorMenu key={workspace.contextVersion} runs={runs} selectedIds={selectedIds} settings={state.colors} theme={resolvedTheme} palettes={workspace.palettes} ready={ready} writable={workspace.writable} onSavePalette={workspace.savePalette} onDeletePalette={workspace.deletePalette} onChange={(colors) => update({ colors })} />}
         compareControls={<CompareControls state={state} metrics={metrics} chosenMetrics={chosenMetrics} params={params} onChange={update} />} />
       <main className="content" id="workspace-panel" role="tabpanel" aria-labelledby={`${state.panel}-tab`} tabIndex={0}>
         {workspace.storageError && <p className="workspace-notice" role="alert">{workspace.storageError}<button className="text-button" onClick={workspace.retryStorage}>Retry saving</button></p>}
-        {workspace.remoteError && <p className="workspace-notice" role="alert">{workspace.remoteError}<button className="text-button" onClick={() => void workspace.retryRemote()}>Retry remote saving</button></p>}
         {workspace.targetsError && <p className="workspace-notice" role="alert">{workspace.targetsError}</p>}
         {workspace.linkNotice && <p className="workspace-notice" role="status">{workspace.linkNotice}</p>}
         {offlineSources.length > 0 && <p className="workspace-notice" role="status">Offline: {offlineSources.map(source => source.label).join(", ")}</p>}
