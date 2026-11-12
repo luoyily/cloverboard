@@ -44,10 +44,35 @@ class WorkspaceStore:
         self.writable = not read_only
         self._lock = RLock()
         self._memory = sqlite3.connect(":memory:", check_same_thread=False) if self._root is None else None
+        self._read_connection: sqlite3.Connection | None = None
+        self._read_identity: tuple[int, int] | None = None
         if self._memory is not None:
             self._memory.executescript(_SCHEMA)
             self._memory.execute(f"PRAGMA user_version = {WORKSPACE_SCHEMA_VERSION}")
             self._memory.commit()
+
+    def close(self) -> None:
+        with self._lock:
+            self._close_read_connection()
+
+    def _close_read_connection(self) -> None:
+        if self._read_connection is not None:
+            self._read_connection.close()
+            self._read_connection = None
+            self._read_identity = None
+
+    def _read_connection_for(self, path: Path) -> sqlite3.Connection:
+        info = path.stat()
+        identity = (info.st_dev, info.st_ino)
+        if self._read_connection is not None and self._read_identity == identity:
+            return self._read_connection
+        self._close_read_connection()
+        # Sync endpoints run on any anyio worker; the store lock serializes use.
+        connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=1, check_same_thread=False)
+        connection.execute("PRAGMA busy_timeout = 1000")
+        self._read_connection = connection
+        self._read_identity = identity
+        return connection
 
     @contextmanager
     def _connection(self, write: bool = False):
@@ -55,6 +80,7 @@ class WorkspaceStore:
             self._require_writable()
         with self._lock:
             connection = self._memory
+            owned = False
             try:
                 if self._root is not None:
                     directory = resolve_log_path(self._root, ".workspace")
@@ -68,13 +94,14 @@ class WorkspaceStore:
                     if write:
                         directory.mkdir(parents=True, exist_ok=True)
                         connection = sqlite3.connect(path, timeout=5)
+                        owned = True
                         connection.execute("PRAGMA journal_mode = WAL")
                         connection.executescript(_SCHEMA)
                         if not exists:
                             connection.execute(f"PRAGMA user_version = {WORKSPACE_SCHEMA_VERSION}")
                             connection.commit()
                     else:
-                        connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=5)
+                        connection = self._read_connection_for(path)
                 if connection is not None:
                     self._check_schema_version(connection)
                 if write:
@@ -83,15 +110,17 @@ class WorkspaceStore:
                 if write:
                     connection.commit()
             except (sqlite3.Error, OSError) as error:
-                if connection is not None:
+                if owned and connection is not None:
                     connection.rollback()
+                elif not write:
+                    self._close_read_connection()
                 raise HTTPException(503, "Workspace database is unavailable") from error
             except BaseException:
-                if write and connection is not None:
+                if owned and connection is not None:
                     connection.rollback()
                 raise
             finally:
-                if connection is not None and connection is not self._memory:
+                if owned and connection is not None:
                     connection.close()
 
     def _require_writable(self):

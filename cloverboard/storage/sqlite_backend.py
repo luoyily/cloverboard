@@ -4,10 +4,11 @@ import json
 import math
 import sqlite3
 import time
+from collections import OrderedDict
 from collections.abc import Iterator, Mapping
 from contextlib import closing, contextmanager
 from pathlib import Path
-from threading import Lock
+from threading import Condition, Lock
 from typing import Any
 
 import numpy as np
@@ -33,7 +34,11 @@ from cloverboard.naming import normalize_display_name
 from cloverboard.tags import normalize_tags
 from cloverboard.storage.paths import UnsafeLogPathError, resolve_log_path, validate_run_id
 
-_sampling_lock = Lock()
+# Recently viewed runs keep one read-only connection open. Open/close churn on
+# the same WAL databases otherwise serializes every request on SQLite's
+# process-global VFS lock, and a close may run a checkpoint of its own. On
+# Windows an open handle blocks deleting that run directory until eviction.
+_MAX_OPEN_READ_DATABASES = 32
 
 
 def read_run_meta(db_path: Path, run_id: str) -> RunMeta:
@@ -194,20 +199,59 @@ class SqliteStorageReader:
 
     def __init__(self, logdir: str | Path) -> None:
         self._logdir = Path(logdir).resolve()
-        self._summary_cache: dict[str, tuple[tuple, RunSummary, float]] = {}
+        self._summary_cache: dict[str, tuple[tuple, "RunSummary", float]] = {}
         self._runs_lock = Lock()
+        self._scan_done = Condition(self._runs_lock)
+        self._scanning = False
+        self._scan_generation = 0
+        self._scan_result: list[RunSummary] | None = None
+        self._connections: OrderedDict[Path, "_ReaderConnection"] = OrderedDict()
+        self._connections_lock = Lock()
+
+    def close(self) -> None:
+        """Release cached read connections (the catalog scan uses its own)."""
+        with self._connections_lock:
+            entries = list(self._connections.values())
+            self._connections.clear()
+        for entry in entries:
+            entry.close()
 
     def list_runs(self) -> list[RunSummary]:
-        with self._runs_lock:
-            return self._list_runs()
+        """Return one catalog scan; concurrent callers share the in-flight scan.
 
-    def _list_runs(self) -> list[RunSummary]:
+        The cache lock is never held while a summary is read, so one slow run
+        cannot serialize every other catalog request behind it.
+        """
+        with self._runs_lock:
+            if self._scanning:
+                generation = self._scan_generation
+                while self._scanning and self._scan_generation == generation:
+                    self._scan_done.wait()
+                if self._scan_generation != generation and self._scan_result is not None:
+                    return list(self._scan_result)
+            self._scanning = True
+            previous = dict(self._summary_cache)
+        try:
+            summaries, merged = self._list_runs(previous)
+        except BaseException:
+            with self._runs_lock:
+                self._scanning = False
+                self._scan_done.notify_all()
+            raise
+        with self._runs_lock:
+            self._summary_cache = merged
+            self._scan_result = summaries
+            self._scan_generation += 1
+            self._scanning = False
+            self._scan_done.notify_all()
+        return summaries
+
+    def _list_runs(self, previous: dict[str, tuple]) -> tuple[list[RunSummary], dict[str, tuple]]:
         if not self._logdir.is_dir():
-            self._summary_cache.clear()
-            return []
+            return [], {}
 
         summaries: list[RunSummary] = []
-        cached: dict[str, tuple[tuple, RunSummary, float]] = {}
+        merged: dict[str, tuple] = {}
         for entry in sorted(self._logdir.iterdir()):
             if not entry.is_dir() or entry.name.startswith("."):
                 continue
@@ -219,16 +263,47 @@ class SqliteStorageReader:
                 stamp = _summary_stamp(db_path)
             except FileNotFoundError:
                 continue
-            previous = self._summary_cache.get(entry.name)
+            previous_entry = previous.get(entry.name)
             checked_at = time.monotonic()
             # A live WAL may reuse pages without a reliable file timestamp update.
             live_wal = stamp[1] is not None and stamp[1][1] > 0
-            reusable = previous and previous[0] == stamp and (not live_wal or checked_at - previous[2] < 1)
-            summary = previous[1] if reusable else self._read_summary(entry.name, db_path)
+            reusable = previous_entry and previous_entry[0] == stamp and (not live_wal or checked_at - previous_entry[2] < 1)
+            summary = previous_entry[1] if reusable else self._read_summary(entry.name, db_path)
             summaries.append(summary)
-            cached[entry.name] = (stamp, summary, previous[2] if reusable else checked_at)
-        self._summary_cache = cached
-        return summaries
+            merged[entry.name] = (stamp, summary, previous_entry[2] if reusable else checked_at)
+        return summaries, merged
+
+    @contextmanager
+    def _cached_read(self, db_path: Path) -> Iterator[sqlite3.Connection]:
+        entry = self._acquire_connection(db_path)
+        with entry.lock:
+            yield entry.connection
+
+    def _acquire_connection(self, db_path: Path) -> "_ReaderConnection":
+        identity = _file_identity(db_path)
+        stale: list[_ReaderConnection] = []
+        with self._connections_lock:
+            entry = self._connections.get(db_path)
+            if entry is not None and entry.identity == identity:
+                self._connections.move_to_end(db_path)
+                return entry
+            if entry is not None:
+                del self._connections[db_path]
+                stale.append(entry)
+        # Dropping the last reference closes evicted connections without
+        # blocking this caller if another thread still has one checked out.
+        entry = _ReaderConnection(db_path, identity)
+        with self._connections_lock:
+            existing = self._connections.get(db_path)
+            if existing is not None:
+                stale.append(entry)
+                entry = existing
+            else:
+                self._connections[db_path] = entry
+                while len(self._connections) > _MAX_OPEN_READ_DATABASES:
+                    _, old = self._connections.popitem(last=False)
+                    stale.append(old)
+        return entry
 
     def get_scalar_series(
         self, run_id: str, metric: str, max_points: int = 800,
@@ -240,10 +315,9 @@ class SqliteStorageReader:
         self, run_id: str, metrics: list[str], max_points: int = 800,
         step_min: int | None = None, step_max: int | None = None, smoothing: float = 0,
     ) -> dict[str, list[ScalarPoint]]:
-        # SQLite row decoding and tiny NumPy reductions contend on the GIL.
-        # Other reader operations remain independent of this sampling queue.
-        with _sampling_lock:
-            return self._read_scalar_batch(run_id, metrics, max_points, step_min, step_max, smoothing)
+        # Samples for different runs stay independent; per-run reads serialize
+        # on that run's cached connection instead of a process-wide lock.
+        return self._read_scalar_batch(run_id, metrics, max_points, step_min, step_max, smoothing)
 
     def _read_scalar_batch(
         self, run_id: str, metrics: list[str], max_points: int,
@@ -251,31 +325,36 @@ class SqliteStorageReader:
     ) -> dict[str, list[ScalarPoint]]:
         metrics = list(dict.fromkeys(metrics))
         db_path = self._run_db_path(run_id)
-        with _connect_readonly(db_path) as connection:
+        with self._cached_read(db_path) as connection:
+            # Cached connections must not keep a read transaction open: it would
+            # pin the WAL and hide later writes from this connection.
             connection.execute("BEGIN")
-            clauses = []
-            arguments: list[Any] = []
-            # EMA needs the prefix before the visible range, otherwise zoom changes its meaning.
-            if step_min is not None and smoothing == 0:
-                clauses.append("step >= ?")
-                arguments.append(step_min)
-            if step_max is not None:
-                clauses.append("step <= ?")
-                arguments.append(step_max)
-            suffix = (" AND " + " AND ".join(clauses)) if clauses else ""
-            rows = {}
-            for metric in metrics:
-                rows[metric] = connection.execute(
-                    "SELECT step, value, wall_time FROM scalars WHERE metric = ?" + suffix + " ORDER BY step, rowid",
-                    [metric, *arguments],
-                ).fetchall()
+            try:
+                clauses = []
+                arguments: list[Any] = []
+                # EMA needs the prefix before the visible range, otherwise zoom changes its meaning.
+                if step_min is not None and smoothing == 0:
+                    clauses.append("step >= ?")
+                    arguments.append(step_min)
+                if step_max is not None:
+                    clauses.append("step <= ?")
+                    arguments.append(step_max)
+                suffix = (" AND " + " AND ".join(clauses)) if clauses else ""
+                rows = {}
+                for metric in metrics:
+                    rows[metric] = connection.execute(
+                        "SELECT step, value, wall_time FROM scalars WHERE metric = ?" + suffix + " ORDER BY step, rowid",
+                        [metric, *arguments],
+                    ).fetchall()
+            finally:
+                connection.rollback()
         return {metric: _sample_scalar_rows(values, max_points, step_min, smoothing) for metric, values in rows.items()}
 
     def get_scalar_summary(
         self, run_id: str, metric: str, target: float | None = None, direction: str = "gte",
     ) -> ScalarSummary:
         db_path = self._run_db_path(run_id)
-        with _connect_readonly(db_path) as connection:
+        with self._cached_read(db_path) as connection:
             latest = connection.execute(
                 "SELECT step, value, wall_time FROM scalars WHERE metric = ? ORDER BY step DESC LIMIT 1", (metric,),
             ).fetchone()
@@ -297,7 +376,7 @@ class SqliteStorageReader:
 
     def list_metrics(self, run_id: str) -> list[str]:
         db_path = self._run_db_path(run_id)
-        with _connect_readonly(db_path) as connection:
+        with self._cached_read(db_path) as connection:
             rows = connection.execute(
                 "SELECT DISTINCT metric FROM scalars ORDER BY metric"
             ).fetchall()
@@ -313,12 +392,13 @@ class SqliteStorageReader:
         if step_max is not None:
             clauses.append("step <= ?")
             arguments.append(step_max)
-        with _connect_readonly(db_path) as connection:
+        with self._cached_read(db_path) as connection:
             low, high, positive = connection.execute("SELECT MIN(value), MAX(value), MIN(CASE WHEN value > 0 THEN value END) FROM scalars WHERE " + " AND ".join(clauses), arguments).fetchone()
             return ScalarBounds(low, high, positive)
 
     def _read_summary(self, run_id: str, db_path: Path) -> RunSummary:
-        with _connect_readonly(db_path) as connection:
+        # One-shot: a scan walks every run and must not keep files open.
+        with _connect_readonly(db_path, timeout=1) as connection:
             meta = dict(connection.execute("SELECT key, value FROM meta").fetchall())
             tags = [row[0] for row in connection.execute("SELECT tag FROM tags ORDER BY tag")]
             note_row = connection.execute("SELECT body FROM run_notes WHERE id=1").fetchone()
@@ -377,12 +457,12 @@ class SqliteStorageReader:
         if step_max is not None:
             clauses.append("step<=?")
             arguments.append(step_max)
-        with _connect_readonly(path) as connection:
+        with self._cached_read(path) as connection:
             return connection.execute("SELECT COUNT(*) FROM scalars WHERE " + " AND ".join(clauses), arguments).fetchone()[0]
 
     def scalar_at_step(self, run_id, metric, step) -> ScalarPoint | None:
         path = self._run_db_path(run_id)
-        with _connect_readonly(path) as connection:
+        with self._cached_read(path) as connection:
             row = connection.execute("SELECT step, value, wall_time FROM scalars WHERE metric=? AND step<=? ORDER BY step DESC, rowid DESC LIMIT 1", (metric, step)).fetchone()
         return ScalarPoint(row[0], float("nan") if row[1] is None else row[1], wall_time=row[2]) if row else None
 
@@ -397,7 +477,7 @@ class SqliteStorageReader:
 
     def _media_names(self, run_id, table):
         path = self._run_db_path(run_id)
-        with _connect_readonly(path) as connection:
+        with self._cached_read(path) as connection:
             rows = connection.execute(f"SELECT name, COUNT(*), COUNT(DISTINCT step), MIN(step), MAX(step) FROM {table} GROUP BY name ORDER BY name").fetchall()
         return [MediaNameSummary(*row) for row in rows]
 
@@ -412,7 +492,7 @@ class SqliteStorageReader:
 
     def get_text(self, run_id, name, step=None) -> TextRecord | None:
         path = self._run_db_path(run_id)
-        with _connect_readonly(path) as connection:
+        with self._cached_read(path) as connection:
             row = connection.execute("SELECT name, step, wall_time, text FROM texts WHERE name=?" +
                 (" AND step<=?" if step is not None else "") + " ORDER BY step DESC LIMIT 1",
                 (name, step) if step is not None else (name,)).fetchone()
@@ -421,7 +501,7 @@ class SqliteStorageReader:
     def _media_timeline(self, run_id, name, max_steps, table):
         path = self._run_db_path(run_id)
         max_steps = max(2, min(500, max_steps))
-        with _connect_readonly(path) as connection:
+        with self._cached_read(path) as connection:
             count = connection.execute(f"SELECT COUNT(DISTINCT step) FROM {table} WHERE name=?", (name,)).fetchone()[0]
             if not count:
                 return MediaTimeline()
@@ -439,7 +519,7 @@ class SqliteStorageReader:
 
     def image_page(self, run_id: str, name: str, step: int | None = None, limit: int = 12, offset: int = 0) -> ImagePage:
         path = self._run_db_path(run_id)
-        with _connect_readonly(path) as connection:
+        with self._cached_read(path) as connection:
             row = connection.execute("SELECT MAX(step) FROM images WHERE name=?" + (" AND step<=?" if step is not None else ""), (name, step) if step is not None else (name,)).fetchone()
             actual = row[0]
             if actual is None:
@@ -455,7 +535,7 @@ class SqliteStorageReader:
 
     def audio_page(self, run_id, name, step=None, limit=12, offset=0) -> AudioPage:
         path = self._run_db_path(run_id)
-        with _connect_readonly(path) as connection:
+        with self._cached_read(path) as connection:
             actual = connection.execute("SELECT MAX(step) FROM audio WHERE name=?" + (" AND step<=?" if step is not None else ""), (name, step) if step is not None else (name,)).fetchone()[0]
             if actual is None:
                 return AudioPage()
@@ -466,7 +546,7 @@ class SqliteStorageReader:
 
     def get_run_note(self, run_id: str) -> RunNote:
         path = self._run_db_path(run_id)
-        with _connect_readonly(path) as connection:
+        with self._cached_read(path) as connection:
             row = connection.execute("SELECT body, updated_at, revision FROM run_notes WHERE id=1").fetchone()
         return RunNote(*row) if row else RunNote()
 
@@ -486,7 +566,7 @@ class SqliteStorageReader:
 
     def get_run_details(self, run_id: str) -> RunDetails:
         path = self._run_db_path(run_id)
-        with _connect_readonly(path) as connection:
+        with self._cached_read(path) as connection:
             meta = dict(connection.execute("SELECT key, value FROM meta").fetchall())
         manifest = resolve_log_path(path.parent, "snapshot", "manifest.json")
         snapshot = None
@@ -502,7 +582,7 @@ class SqliteStorageReader:
         if asset_id == "snapshot":
             path = resolve_log_path(db_path.parent, "snapshot", "code.zip")
             return FileAsset("application/zip", "code.zip", path) if path.is_file() else None
-        with _connect_readonly(db_path) as connection:
+        with self._cached_read(db_path) as connection:
             row = connection.execute("SELECT path, format FROM images WHERE image_id = ?", (asset_id,)).fetchone()
             if row is None:
                 audio = connection.execute("SELECT path FROM audio WHERE audio_id=?", (asset_id,)).fetchone()
@@ -558,9 +638,48 @@ def _sample_scalar_rows(rows: list[tuple], max_points: int, step_min: int | None
     return [ScalarPoint(step=int(steps[index]), value=float(values[index]), smoothed=float(smoothed[index]), wall_time=float(times[index])) for index in indices]
 
 
+def _open_readonly(db_path: Path, timeout: float = 1.0, *, cross_thread: bool = False) -> sqlite3.Connection:
+    connection = sqlite3.connect(
+        f"{db_path.resolve().as_uri()}?mode=ro", uri=True,
+        timeout=timeout, check_same_thread=not cross_thread,
+    )
+    connection.execute(f"PRAGMA busy_timeout = {max(1, int(timeout * 1000))}")
+    return connection
+
+
+def _file_identity(db_path: Path) -> tuple[int, int]:
+    info = db_path.stat()
+    return info.st_dev, info.st_ino
+
+
+class _ReaderConnection:
+    """One cached read connection; callers serialize on ``lock``."""
+
+    __slots__ = ("identity", "connection", "lock")
+
+    def __init__(self, db_path: Path, identity: tuple[int, int]) -> None:
+        self.identity = identity
+        # Worker threads take turns on ``lock``; SQLite's own thread check
+        # would reject the second caller.
+        self.connection = _open_readonly(db_path, cross_thread=True)
+        self.lock = Lock()
+
+    def close(self) -> None:
+        with self.lock:
+            self.connection.close()
+
+    def __del__(self) -> None:
+        # Evicted connections may still be checked out by another thread; closing
+        # here runs only after the last reference is released.
+        try:
+            self.connection.close()
+        except Exception:
+            pass
+
+
 @contextmanager
-def _connect_readonly(db_path: Path) -> Iterator[sqlite3.Connection]:
-    connection = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
+def _connect_readonly(db_path: Path, timeout: float = 5.0) -> Iterator[sqlite3.Connection]:
+    connection = _open_readonly(db_path, timeout)
     try:
         yield connection
     finally:

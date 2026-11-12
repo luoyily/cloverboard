@@ -149,6 +149,11 @@ class SourceReader:
             if self._client is not None:
                 self._client.close()
                 self._client = None
+        readers = {id(reader): reader for reader in (self.primary, *(source.reader for source in self.sources.values())) if reader is not None}
+        for reader in readers.values():
+            close = getattr(reader, "close", None)
+            if close is not None:
+                close()
 
     def _json(self, source: Source, route: str, params=None):
         query = {key: value for key, value in (params or {}).items() if value is not None}

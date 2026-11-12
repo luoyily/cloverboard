@@ -203,6 +203,21 @@ changes require rebuilding and reloading; rerunning the default command builds
 the latest source. `--skip-build` is an explicit opt-out. Avoid adding separate
 ad hoc fixture generators when a new scenario can extend these shared helpers.
 
+## Read-path stress
+
+Replay the Web UI's catalog/metrics/summary/series read mix against a running
+server. It only reads data and never changes the workspace:
+
+```sh
+python scripts/stress_reads.py --url http://127.0.0.1:6030 --concurrency 40 --duration 30
+python scripts/stress_reads.py --url "http://host:7230/?token=..." --catalog-only
+```
+
+`--concurrency` defaults to 40, the server's sync worker-pool limit. While it
+runs, `py-spy dump --native --pid <server>` separates SQLite connection churn
+from disk or lock waits. `--json` prints a machine-readable report and
+`--fail-on-error` makes a failed request exit non-zero.
+
 ## Repeatable Charts performance measurements
 
 With the current preview already running, collect read-only HTTP, client-creation

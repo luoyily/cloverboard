@@ -57,8 +57,10 @@ def create_app(
             async with mcp.session_manager.run():
                 yield
         finally:
-            if isinstance(combined_reader, SourceReader):
-                combined_reader.close()
+            close = getattr(combined_reader, "close", None)
+            if close is not None:
+                close()
+            app.state.workspace.close()
 
     app = FastAPI(
         title="CloverBoard", lifespan=lifespan,
