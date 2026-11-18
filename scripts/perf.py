@@ -188,7 +188,6 @@ def create_probe_app(url, headers, report, workspace, repeats, output, timeout):
             iteration = request.headers.get("x-cloverboard-perf-round", "0")
             selected = report["cases"].get(case, [])
             state = {**(workspace.get("state") or {}), "panel": "charts", "selected_ids": selected,
-                     "refresh_interval": 0,
                      "chart_zoom": {}, "chart_warmup": {}, "expanded_charts": [],
                      "collapsed_groups": ["diagnostics", "optimizer"], "active_view_id": None}
             if state.get("baseline_id") not in selected:

@@ -8,6 +8,18 @@ export type ChartCardStyle = "normal" | "transparent";
 export type ChartLegendLayout = "single" | "multi";
 export type ChartLegendMode = "hidden" | ChartLegendLayout;
 
+// Auto refresh belongs to the browser, not to a View or the shared workspace:
+// opening a View must not turn polling on or off for this tab.
+export const REFRESH_INTERVALS = [0, 5, 10, 30, 60] as const;
+export type RefreshInterval = (typeof REFRESH_INTERVALS)[number];
+export const REFRESH_INTERVAL_KEY = "cloverboard:refresh-interval";
+export function isRefreshInterval(value: unknown): value is RefreshInterval {
+  return typeof value === "number" && (REFRESH_INTERVALS as readonly number[]).includes(value);
+}
+export function normalizeRefreshInterval(value: unknown): RefreshInterval {
+  return isRefreshInterval(value) ? value : 5;
+}
+
 // Saved viewing settings. Pointer/readout state, chart zoom and browser
 // preferences belong to the UI and must not enter Views, JSON or remote saves.
 export interface WorkspaceState {
@@ -42,7 +54,6 @@ export interface WorkspaceState {
   chart_scales: Record<string, "linear" | "log">;
   collapsed_groups: string[];
   expanded_charts: string[];
-  refresh_interval: number;
   panel: "charts" | "table" | "images";
   media_type: "images" | "audio" | "text";
   text_name: string;
@@ -84,7 +95,6 @@ export function defaultWorkspaceState(): WorkspaceState {
     tooltip_time: "hidden",
     tooltip_delta: "both",
     chart_warmup: {}, y_warmup: null, y_scale: "linear", chart_scales: {}, collapsed_groups: [], expanded_charts: [],
-    refresh_interval: 5,
     panel: "charts",
     media_type: "images", audio_name: "", audio_step: null, text_name: "", text_step: null,
     image_name: "", image_step: null, image_timeline_samples: 200, images_per_step: 12,
@@ -152,7 +162,6 @@ export function normalizeState(state: Partial<WorkspaceState>): WorkspaceState {
   if (!["baseline", "target", "both", "hidden"].includes(next.tooltip_delta)) next.tooltip_delta = "both";
   next.chart_warmup = Object.fromEntries(entries(state.chart_warmup).filter(([, step]) => step === null || Number.isSafeInteger(step)));
   if (next.y_warmup !== null && !Number.isSafeInteger(next.y_warmup)) next.y_warmup = null;
-  if (![0, 5, 10, 30, 60].includes(next.refresh_interval)) next.refresh_interval = 5;
   if (!["charts", "table", "images"].includes(next.panel)) next.panel = "charts";
   if (typeof next.image_name !== "string") next.image_name = "";
   if (!Number.isSafeInteger(next.image_step)) next.image_step = null;

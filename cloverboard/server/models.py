@@ -281,6 +281,8 @@ class WorkspaceState(BaseModel):
     chart_scales: dict[str, Literal["linear", "log"]] = Field(default_factory=dict)
     collapsed_groups: list[str] = Field(default_factory=list)
     expanded_charts: list[str] = Field(default_factory=list)
+    # Deprecated: auto refresh is a browser preference now. Kept so payloads
+    # from older clients and older saved Views still parse.
     refresh_interval: Literal[0, 5, 10, 30, 60] = 5
     panel: Literal["charts", "table", "images"] = "charts"
     media_type: Literal["images", "audio", "text"] = "images"

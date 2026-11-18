@@ -34,13 +34,14 @@ def test_preview_named_targets_and_views_are_seeded_once(tmp_path):
     seed_workspace(tmp_path)
     store = WorkspaceStore(tmp_path / "data" / "main")
     snapshot = store.snapshot()
-    targets = snapshot.state.targets["validation/score"]
+    targets = snapshot.target_library.targets["validation/score"]
     assert snapshot.state.metric_columns == ["train/loss", "validation/score"]
     assert targets.active_id == "small"
     assert [(target.name, target.chart_label, target.value) for target in targets.items] == [
         ("Small model", "S", .9), ("Large model", "L", .95),
     ]
-    assert all(view.state.targets == snapshot.state.targets for view in snapshot.views)
+    # Targets are workspace-level; View snapshots no longer embed them.
+    assert all(view.state.targets == {} for view in snapshot.views)
     assert len(RUNS[1].name) > 40
     seed_workspace(tmp_path)
     assert store.snapshot() == snapshot

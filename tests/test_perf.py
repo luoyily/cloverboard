@@ -41,7 +41,7 @@ def test_browser_probe_isolates_workspace_blocks_writes_and_saves_results(tmp_pa
     with TestClient(app, base_url="http://127.0.0.1") as client:
         snapshot = client.get("/api/workspace", headers={"X-Cloverboard-Perf-Case": "mixed", "X-Cloverboard-Perf-Round": "1"}).json()
         assert snapshot["workspace_id"] != "original" and snapshot["writable"] is False
-        assert snapshot["state"]["panel"] == "charts" and snapshot["state"]["refresh_interval"] == 0
+        assert snapshot["state"]["panel"] == "charts"
         assert snapshot["state"]["selected_ids"] == ["one", "peer:two"] and snapshot["state"]["baseline_id"] is None
         assert original["state"]["panel"] == "table" and original["state"]["selected_ids"] == ["untouched"]
         assert client.put("/api/workspace/state", json={}).status_code == 403

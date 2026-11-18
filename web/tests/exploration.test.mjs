@@ -8,7 +8,7 @@ import ts from "typescript";
 
 const directory = await mkdtemp(join(tmpdir(), "cloverboard-tests-"));
 after(() => rm(directory, { recursive: true, force: true }));
-for (const name of ["palettes", "comparison", "features", "targets", "chartMath", "colorMath", "colors", "api", "workspace", "viewingConfig", "readout", "imageTimeline", "dataCache", "runSelection"]) {
+for (const name of ["palettes", "comparison", "features", "targets", "chartMath", "colorMath", "colors", "api", "workspace", "viewingConfig", "readout", "imageTimeline", "dataCache", "runSelection", "refreshTimer"]) {
   const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), "utf8");
   let { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
   outputText = outputText.replace(/from "\.\/([^"]+)"/g, 'from "./$1.mjs"').replace('from "react"', `from "${pathToFileURL(resolve("node_modules/react/index.js")).href}"`);
@@ -27,7 +27,8 @@ const { imagesAtStep, sampleSteps } = await import(pathToFileURL(join(directory,
 const { nearestPoint, buildPath, compareReadouts, valueDomain, fittedDomain, logTicks, visiblePoints, tailStepRange, stepAxis, lonePoint } = await import(pathToFileURL(join(directory, "chartMath.mjs")));
 const { pooledResults, getJson, fetchRunsWithEtag } = await import(pathToFileURL(join(directory, "api.mjs")));
 const { BoundedCache, RequestCache } = await import(pathToFileURL(join(directory, "dataCache.mjs")));
-const { defaultWorkspaceState, normalizeState, viewStateKey, encodeSharedState, readSharedLocation } = await import(pathToFileURL(join(directory, "workspace.mjs")));
+const { defaultWorkspaceState, normalizeState, viewStateKey, encodeSharedState, readSharedLocation, normalizeRefreshInterval, isRefreshInterval, REFRESH_INTERVAL_KEY } = await import(pathToFileURL(join(directory, "workspace.mjs")));
+const { startRefreshTimer } = await import(pathToFileURL(join(directory, "refreshTimer.mjs")));
 const configModule = await import(pathToFileURL(join(directory, "viewingConfig.mjs")));
 const comparison = await import(pathToFileURL(join(directory, "comparison.mjs")));
 const run = (id, config = {}, source = "local") => ({ run_id: id, name: id, source, started_at: 1, has_scalars: true, last_recorded_at: null, config });
@@ -515,10 +516,51 @@ test("views keep explicit selection and viewing defaults", () => {
   const defaults = normalizeState({ version: 1, selected_ids: [] });
   assert.deepEqual(defaults.selected_ids, []);
   assert.equal(defaults.colors.mode, "random");
-  assert.equal(defaults.refresh_interval, 5);
   assert.equal(defaults.tooltip_sort, "value");
-  assert.equal(normalizeState({ refresh_interval: 0 }).refresh_interval, 0);
-  assert.equal(normalizeState({ refresh_interval: -1 }).refresh_interval, 5);
+  assert.equal(Object.hasOwn(defaults, "refresh_interval"), false);
+  assert.equal(normalizeState({ refresh_interval: 0 }).refresh_interval, undefined);
+  assert.equal(viewStateKey({ ...state, refresh_interval: 0 }), viewStateKey(state));
+  assert.equal(REFRESH_INTERVAL_KEY, "cloverboard:refresh-interval");
+  assert.equal(normalizeRefreshInterval(0), 0);
+  assert.equal(normalizeRefreshInterval(30), 30);
+  assert.equal(normalizeRefreshInterval(-1), 5);
+  assert.equal(normalizeRefreshInterval("30"), 5);
+  assert.equal(isRefreshInterval(60), true);
+  assert.equal(isRefreshInterval(7), false);
+});
+
+test("auto refresh resumes immediately after a throttled hidden period", () => {
+  let now = 0, nextId = 1, hidden = false, polls = 0;
+  const jobs = new Map();
+  const timer = startRefreshTimer({
+    intervalMs: 5000,
+    isHidden: () => hidden,
+    now: () => now,
+    setTimeout: (handler, delay) => { const id = nextId++; jobs.set(id, { handler, at: now + delay }); return id; },
+    clearTimeout: (id) => { jobs.delete(id); },
+    onPoll: () => { polls += 1; },
+  });
+  const runDue = () => {
+    while (true) {
+      const due = [...jobs.entries()].filter(([, job]) => job.at <= now);
+      if (!due.length) return;
+      for (const [id, job] of due) { jobs.delete(id); job.handler(); }
+    }
+  };
+
+  now = 4000; runDue();
+  assert.equal(polls, 0);
+  now = 5000; runDue();
+  assert.equal(polls, 1);
+  // A hidden tick is skipped but still schedules the next timeout.
+  hidden = true; now = 11000; runDue();
+  assert.equal(polls, 1);
+  // The browser suspended the timer while hidden; returning polls at once.
+  hidden = false; now = 40000; timer.resume();
+  assert.equal(polls, 2);
+  now = 45000; runDue();
+  assert.equal(polls, 3);
+  timer.stop();
 });
 
 test("hover order follows the rendered values, keeps baseline first and supports fixed order", () => {

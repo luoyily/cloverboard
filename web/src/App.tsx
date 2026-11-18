@@ -10,6 +10,7 @@ import { activeTarget } from "./targets";
 import { availableSelection, reconcileSelection, recentRunIds, replaceSelection, selectionPatch, sortRuns } from "./runSelection";
 import { useColors } from "./useColors";
 import { useScalarSeries } from "./useScalarSeries";
+import { startRefreshTimer } from "./refreshTimer";
 import ColorMenu from "./components/ColorMenu";
 import ColorLegend from "./components/ColorLegend";
 import RunAppearance from "./components/RunAppearance";
@@ -27,6 +28,7 @@ const EMPTY_SUMMARIES = new Map<string, ScalarSummary>();
 export default function App() {
   const workspace = useWorkspace();
   const { state, update, ready } = workspace;
+  const refreshInterval = workspace.refreshInterval;
   const targets = workspace.targets;
   const [runCatalog, setRunCatalog] = useState<RunCatalog | null>(null);
   const [localRuns, setLocalRuns] = useState<RunSummary[]>([]);
@@ -150,12 +152,26 @@ export default function App() {
   }, [ready, discovering, status, runCatalog, state.selected_ids, state.baseline_id, update]);
 
   useEffect(() => {
-    if (!ready || state.refresh_interval === 0) return;
-    const timer = window.setInterval(() => {
-      if (!document.hidden) setPollTick((tick) => tick + 1);
-    }, state.refresh_interval * 1000);
-    return () => window.clearInterval(timer);
-  }, [ready, state.refresh_interval]);
+    if (!ready || refreshInterval === 0) return;
+    const loop = startRefreshTimer({
+      intervalMs: refreshInterval * 1000,
+      isHidden: () => document.hidden,
+      now: () => Date.now(),
+      setTimeout: (handler, delay) => window.setTimeout(handler, delay),
+      clearTimeout: (id) => window.clearTimeout(id),
+      onPoll: () => setPollTick((tick) => tick + 1),
+    });
+    const resume = () => loop.resume();
+    document.addEventListener("visibilitychange", resume);
+    window.addEventListener("pageshow", resume);
+    window.addEventListener("focus", resume);
+    return () => {
+      loop.stop();
+      document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener("pageshow", resume);
+      window.removeEventListener("focus", resume);
+    };
+  }, [ready, refreshInterval]);
 
   useEffect(() => {
     if (ready && !discovering && state.selected_ids === null && runs.some((run) => run.has_scalars)) {
@@ -272,6 +288,7 @@ export default function App() {
     <div className="workspace">
       <TopBar themeMode={themeMode} onThemeToggle={() => setThemeMode((mode) => nextThemeMode(mode))}
         onRefresh={() => { setDataTick((tick) => tick + 1); if (workspace.loadError) workspace.retry(); }}
+        refreshInterval={refreshInterval} onRefreshInterval={workspace.setRefreshInterval}
         state={state} sharedViews={workspace.sharedViews} localViews={workspace.localViews} activeView={workspace.activeView} writable={workspace.writable} ready={ready} storageError={workspace.storageError} onImportConfig={workspace.importConfig}
         onChange={update} targets={targets} onSaveTargets={workspace.saveTargets} onOpenView={workspace.openView} onSaveView={workspace.saveView} onDeleteView={workspace.deleteView} onRenameView={workspace.renameView} onPromoteView={workspace.promoteView}
         metrics={metrics}

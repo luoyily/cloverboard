@@ -94,7 +94,7 @@ def seed_workspace(directory: Path):
         return
     state = WorkspaceState(
         selected_ids=["baseline", "lower-lr", "partial-75", qualify("folder", "trial"), qualify("peer", "trial")],
-        refresh_interval=0, collapsed_groups=["diagnostics", "optimizer"], baseline_id="baseline",
+        collapsed_groups=["diagnostics", "optimizer"], baseline_id="baseline",
         metric_columns=["train/loss", "validation/score"],
     )
     store.save_view(SavedViewInput(name="Training overview", state=state))

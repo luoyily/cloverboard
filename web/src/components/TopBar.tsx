@@ -20,6 +20,8 @@ interface TopBarProps {
   themeMode: ThemeMode;
   onThemeToggle: () => void;
   onRefresh: () => void;
+  refreshInterval: number;
+  onRefreshInterval: (seconds: number) => void;
   state: WorkspaceState;
   sharedViews: SavedView[];
   localViews: SavedView[];
@@ -51,6 +53,8 @@ export default function TopBar({
   themeMode,
   onThemeToggle,
   onRefresh,
+  refreshInterval,
+  onRefreshInterval,
   state,
   sharedViews, localViews, activeView,
   writable,
@@ -117,7 +121,7 @@ export default function TopBar({
         /> : state.panel === "table" ? compareControls : <ImageSettings state={state} onChange={onChange} />}
         <div className="toolbar-actions">
           {storageError && <span className="local-save-indicator" title={storageError} role="status" aria-label="Local settings could not be saved"><CloudSlashIcon size={15} aria-hidden="true" /></span>}
-        <RefreshControl interval={state.refresh_interval} onRefresh={onRefresh} onInterval={(refresh_interval) => onChange({ refresh_interval })} />
+        <RefreshControl interval={refreshInterval} onRefresh={onRefresh} onInterval={onRefreshInterval} />
         <SettingsMenu ready={ready} state={state} views={localViews} onImport={onImportConfig}>
           <button type="button" className="menu-item theme-menu-item" onClick={onThemeToggle} aria-label={`Change theme, current: ${THEME_LABELS[themeMode]}`}><ThemeIcon size={16} aria-hidden="true" /><span>Theme: {THEME_LABELS[themeMode]}</span></button>
         </SettingsMenu>

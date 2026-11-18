@@ -36,5 +36,6 @@ window.addEventListener("message", async event => {
     status.textContent = rows.some(row => row.error || row.errors.length) ? "Finished with errors; inspect the report." : "Finished: all measurements completed.";
   } catch (error) { status.textContent = error.message; }
 });
+localStorage.setItem("cloverboard:refresh-interval", "0");
 next();
 </script></body></html>

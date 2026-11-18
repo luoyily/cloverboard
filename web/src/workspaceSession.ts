@@ -1,9 +1,13 @@
 import type { CustomPalette, PaletteInput } from "./palettes";
-import { defaultWorkspaceState, normalizeState, readSharedLocation, viewStateKey, type SavedView, type WorkspaceState, type WorkspaceUpdate } from "./workspace";
+import {
+  defaultWorkspaceState, isRefreshInterval, normalizeRefreshInterval, normalizeState, readSharedLocation,
+  viewStateKey, REFRESH_INTERVAL_KEY, type RefreshInterval, type SavedView, type WorkspaceState, type WorkspaceUpdate,
+} from "./workspace";
 import { normalizeTargets, type TargetLibrary } from "./targets";
 import {
   STORAGE_ERROR, legacyConfigKey, localViewsKey, mergeLocalViews, parseImportFile, parseLegacyConfig,
-  readLocalViews, readSession, renameLocalView, saveLocalView, sessionKey, writeLocalViews, writeSession,
+  readLocalViews, readSession, readStoredRefreshInterval, renameLocalView, saveLocalView, sessionKey,
+  writeLocalViews, writeSession,
   type ActiveView, type SessionFile, type ViewScope,
 } from "./viewingConfig";
 
@@ -37,6 +41,7 @@ export class WorkspaceSession {
     palettes: [] as CustomPalette[],
     targets: {} as TargetLibrary,
     state: defaultWorkspaceState(),
+    refreshInterval: 5 as RefreshInterval,
     activeView: null as ActiveView | null,
     workspaceId: "",
     writable: false,
@@ -84,6 +89,32 @@ export class WorkspaceSession {
       writeSession(this.storage(), this.sessionStorageKey, { version: 1, state, active_view: activeView });
       return "";
     } catch { return STORAGE_ERROR; }
+  }
+  private readRefreshPreference(): RefreshInterval | null {
+    try {
+      const stored = this.storage().getItem(REFRESH_INTERVAL_KEY);
+      if (stored === null || stored.trim() === "") return null;
+      const value = Number(stored);
+      return isRefreshInterval(value) ? value : null;
+    } catch { return null; }
+  }
+  private writeRefreshPreference(interval: RefreshInterval) {
+    try { this.storage().setItem(REFRESH_INTERVAL_KEY, String(interval)); }
+    catch { /* Optional browser preference. */ }
+  }
+  // Move the old state-scoped value once, but never inherit the shared workspace
+  // default: a new browser starts with 5s unless this browser chose otherwise.
+  private restoreRefreshInterval(sessionStorageKey: string, legacyStorageKey: string): RefreshInterval {
+    const preference = this.readRefreshPreference();
+    if (preference !== null) return preference;
+    let legacy: unknown = null;
+    try { legacy = readStoredRefreshInterval(this.storage(), sessionStorageKey); } catch { /* Ignore invalid storage. */ }
+    if (legacy === null || legacy === undefined) {
+      try { legacy = readStoredRefreshInterval(this.storage(), legacyStorageKey); } catch { /* Ignore invalid storage. */ }
+    }
+    const interval = normalizeRefreshInterval(legacy);
+    this.writeRefreshPreference(interval);
+    return interval;
   }
   private saveLocalViews(views: SavedView[]): string {
     try {
@@ -150,6 +181,7 @@ export class WorkspaceSession {
       this.sessionStorageKey = sessionKey(remote.workspace.workspace_id);
       this.localViewsStorageKey = localViewsKey(remote.workspace.workspace_id);
       this.targetsSavedAt = remote.workspace.target_library.saved_at;
+      const refreshInterval = this.restoreRefreshInterval(this.sessionStorageKey, legacyConfigKey(remote.workspace.workspace_id));
       const sharedViews = remote.workspace.views;
 
       let localViews: SavedView[] = [];
@@ -206,7 +238,7 @@ export class WorkspaceSession {
       this.replaceContext({
         sharedViews, localViews, palettes: remote.palettes, targets: remote.workspace.target_library.targets,
         workspaceId: remote.workspace.workspace_id, writable: remote.workspace.writable,
-        state, activeView, ready: true, storageError: storageError || writeError, linkNotice,
+        state, refreshInterval, activeView, ready: true, storageError: storageError || writeError, linkNotice,
       });
       return fromLink;
     } catch {
@@ -220,6 +252,12 @@ export class WorkspaceSession {
     const state = normalizeState({ ...this.snapshot.state, ...(typeof patch === "function" ? patch(this.snapshot.state) : patch) });
     this.writeSession(state, this.snapshot.activeView);
     this.publish({ state });
+  };
+
+  setRefreshInterval = (value: number) => {
+    const refreshInterval = normalizeRefreshInterval(value);
+    this.writeRefreshPreference(refreshInterval);
+    this.publish({ refreshInterval });
   };
 
   openView = (view: SavedView, scope: ViewScope) => {

@@ -67,6 +67,15 @@ export function readSession(storage: Pick<Storage, "getItem">, key: string): Ses
   return { version: 1, state: parseState(value.state), active_view: parseActiveView(value.active_view) };
 }
 
+// Auto refresh used to live in the saved state. Read that one-time value so
+// existing browsers keep their choice when it moves to a preference key.
+export function readStoredRefreshInterval(storage: Pick<Storage, "getItem">, key: string): unknown {
+  const text = storage.getItem(key);
+  if (text === null) return null;
+  const value: unknown = JSON.parse(text);
+  return record(value) && record(value.state) ? value.state.refresh_interval : null;
+}
+
 export function writeSession(storage: Pick<Storage, "setItem">, key: string, session: SessionFile): void {
   storage.setItem(key, JSON.stringify(session));
 }

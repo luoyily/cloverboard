@@ -16,7 +16,7 @@ export function useWorkspace() {
   }, [session, loadTick]);
   return {
     ...snapshot,
-    update: session.update, openView: session.openView,
+    update: session.update, setRefreshInterval: session.setRefreshInterval, openView: session.openView,
     saveView: session.saveView, renameView: session.renameView, deleteView: session.deleteView, promoteView: session.promoteView,
     saveTargets: session.saveTargets, savePalette: session.savePalette, deletePalette: session.deletePalette,
     importConfig: session.importConfig, retryStorage: session.retryStorage,

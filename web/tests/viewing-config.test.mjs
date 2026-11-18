@@ -162,9 +162,55 @@ function watchingSettings() {
     metric_columns: ["score"], hidden_params: ["seed"], differences_only: false, sort_column: "metric:score", sort_desc: true,
     table_decimals: 2, table_time: "hidden", table_show_steps: false, table_delta: "target", show_tags_column: true,
     media_type: "audio", audio_name: "sample", audio_step: 0, image_name: "pred", image_step: 100,
-    text_name: "prompt", text_step: 200, image_timeline_samples: 50, images_per_step: 4, refresh_interval: 30,
+    text_name: "prompt", text_step: 200, image_timeline_samples: 50, images_per_step: 4,
   });
 }
+
+test("browser auto refresh ignores shared state and survives View changes", async t => {
+  const f = sessionFixture(t);
+  f.remote.state.refresh_interval = 0;
+  f.remote.views.push({ view_id: "a".repeat(32), name: "Off", state: { ...normalize({ smoothing: .2 }), refresh_interval: 0 } });
+  await f.session.load("http://localhost/");
+  assert.equal(f.session.getSnapshot().refreshInterval, 5);
+  assert.equal(f.memory.get(workspace.REFRESH_INTERVAL_KEY), "5");
+  f.session.setRefreshInterval(30);
+  assert.equal(f.session.getSnapshot().refreshInterval, 30);
+  assert.equal(f.memory.get(workspace.REFRESH_INTERVAL_KEY), "30");
+  f.session.openView(f.session.getSnapshot().sharedViews[0], "shared");
+  assert.equal(f.session.getSnapshot().refreshInterval, 30);
+  const reloaded = new WorkspaceSession(f.request, () => f.storage);
+  t.after(() => reloaded.stop());
+  await reloaded.load("http://localhost/");
+  assert.equal(reloaded.getSnapshot().refreshInterval, 30);
+});
+
+test("legacy local refresh interval migrates once and yields to the browser preference", async t => {
+  const f = sessionFixture(t);
+  const legacyState = { ...workspace.defaultWorkspaceState(), refresh_interval: 60 };
+  f.memory.set(configModule.sessionKey("workspace-a"), JSON.stringify({ version: 1, state: legacyState, active_view: null }));
+  await f.session.load("http://localhost/");
+  assert.equal(f.session.getSnapshot().refreshInterval, 60);
+  assert.equal(f.memory.get(workspace.REFRESH_INTERVAL_KEY), "60");
+  f.memory.set(configModule.sessionKey("workspace-a"), JSON.stringify({ version: 1, state: { ...legacyState, refresh_interval: 0 }, active_view: null }));
+  const reloaded = new WorkspaceSession(f.request, () => f.storage);
+  t.after(() => reloaded.stop());
+  await reloaded.load("http://localhost/");
+  assert.equal(reloaded.getSnapshot().refreshInterval, 60);
+});
+
+test("auto refresh is not saved in Views or session state", async t => {
+  const f = sessionFixture(t);
+  f.remote.views.push({ view_id: "a".repeat(32), name: "Shared", state: normalize({ smoothing: .2 }) });
+  await f.session.load("http://localhost/");
+  f.session.openView(f.session.getSnapshot().sharedViews[0], "shared");
+  const baseKey = f.session.getSnapshot().activeView.base_key;
+  f.session.setRefreshInterval(30);
+  assert.equal(f.session.getSnapshot().activeView.base_key, baseKey);
+  assert.equal(f.session.getSnapshot().state.refresh_interval, undefined);
+  await f.session.saveView("Shared", "shared", f.session.getSnapshot().activeView.view_id);
+  assert.equal(Object.hasOwn(f.remote.views[0].state, "refresh_interval"), false);
+  assert.equal(configModule.readSession(f.storage, configModule.sessionKey("workspace-a")).state.refresh_interval, undefined);
+});
 
 test("loading keeps My Views and session state while refreshing shared assets", async t => {
   const f = sessionFixture(t), { session } = f;
