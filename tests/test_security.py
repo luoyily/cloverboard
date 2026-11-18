@@ -75,6 +75,22 @@ def test_tokens_rotate_and_stale_session_is_rejected(tmp_path):
     assert response.status_code == 200
 
 
+def test_fixed_share_token_authenticates_and_stays_read_only(tmp_path):
+    app = _local_app(tmp_path, share_token="fixed-secret")
+    assert app.state.access_token == "fixed-secret"
+    client = TestClient(app, base_url="http://127.0.0.1")
+    assert client.get("/api/runs").status_code == 401
+    headers = {"Authorization": "Bearer fixed-secret"}
+    assert client.get("/api/workspace", headers=headers).json()["writable"] is False
+    assert client.post("/api/workspace/views", headers=headers, json={"name": "x", "state": {}}).status_code == 403
+
+
+@pytest.mark.parametrize("token", ["", "bad token", "snow☃"])
+def test_invalid_fixed_share_tokens_are_rejected(token):
+    with pytest.raises(ValueError, match="share_token"):
+        create_app(share_token=token)
+
+
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"])
 @pytest.mark.parametrize("share", [False, True])
 def test_read_only_protects_all_routes_before_route_validation(tmp_path, method, share):

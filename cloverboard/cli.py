@@ -4,6 +4,12 @@ import argparse
 import sys
 
 
+def _share_token(value: str) -> str:
+    if not value or not value.isascii() or not value.isprintable() or any(char.isspace() for char in value):
+        raise argparse.ArgumentTypeError("token must be non-empty printable ASCII without whitespace")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cloverboard")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -17,6 +23,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--share",
         action="store_true",
         help="generate an access token and force read-only mode",
+    )
+    serve.add_argument(
+        "--share-token",
+        metavar="TOKEN",
+        type=_share_token,
+        help="fixed access token; implies --share and forces read-only mode",
     )
     serve.add_argument("--peers", default="", help="comma-separated [NAME=]host:port[?token=TOKEN] sources; HTTP(S) URLs are supported")
     serve.add_argument("--source", action="append", default=[], help="additional local NAME=LOGDIR (repeatable)")
@@ -66,8 +78,10 @@ def main(argv: list[str] | None = None) -> None:
         sources = load_sources(args.peers, args.source, args.sources)
     except (OSError, ValueError) as error:
         raise SystemExit(f"Invalid sources configuration: {error}") from error
-    app = create_app(reader, logdir=args.logdir, read_only=args.read_only, share=args.share, sources=sources, host=args.host)
-    if args.share:
+    share = args.share or args.share_token is not None
+    app = create_app(reader, logdir=args.logdir, read_only=args.read_only, share=share,
+                     share_token=args.share_token, sources=sources, host=args.host)
+    if share:
         host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(args.host, args.host)
         if ":" in host:
             host = f"[{host}]"

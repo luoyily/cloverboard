@@ -31,6 +31,7 @@ def create_app(
     logdir: str | Path | None = None,
     read_only: bool = False,
     share: bool = False,
+    share_token: str | None = None,
     sources: list[Source] | None = None,
     host: str = "127.0.0.1",
 ) -> FastAPI:
@@ -44,7 +45,12 @@ def create_app(
         an isolated in-memory workspace for fixtures and tests.
     read_only: reject HTTP writes while allowing browser-local viewing state.
     share: require a fresh access token and force read-only mode.
+    share_token: fixed token for share mode; implies share.
     """
+    if share_token is not None:
+        if not share_token or not share_token.isascii() or not share_token.isprintable() or any(char.isspace() for char in share_token):
+            raise ValueError("share_token must be non-empty printable ASCII without whitespace")
+        share = True
     combined_reader = SourceReader(reader, sources) if sources else reader
     mcp = create_mcp(combined_reader, host, authenticated=share)
     mcp_http = mcp.streamable_http_app()
@@ -76,7 +82,7 @@ def create_app(
     )
     app.state.mcp = mcp
     read_only = read_only or share
-    app.state.access_token = secrets.token_urlsafe(16) if share else None
+    app.state.access_token = share_token if share_token is not None else (secrets.token_urlsafe(16) if share else None)
     # McpBodyGuard is registered first so SecurityMiddleware stays outermost:
     # authentication runs before any request body is read. Tokenless servers also
     # reject foreign Host headers (DNS-rebinding protection); share mode keeps

@@ -11,6 +11,7 @@ def test_serve_defaults():
     assert args.port == 7230
     assert args.read_only is False
     assert args.share is False
+    assert args.share_token is None
     assert args.peers == ""
 
 
@@ -104,6 +105,32 @@ def test_share_prints_a_fresh_working_link_and_forces_read_only(monkeypatch, tmp
         assert client.get("/api/workspace", headers=headers).json()["writable"] is False
         assert client.post("/api/workspace/views", headers=headers, json={"name": "x", "state": {}}).status_code == 403
     assert applications[0].state.access_token != applications[1].state.access_token
+
+
+def test_share_token_uses_a_fixed_token_and_forces_read_only(monkeypatch, tmp_path, capsys):
+    from fastapi.testclient import TestClient
+
+    from cloverboard.cli import main
+
+    applications = []
+    monkeypatch.setattr("uvicorn.run", lambda app, **options: applications.append(app))
+    for _ in range(2):
+        main(["serve", "--logdir", str(tmp_path), "--share-token", "fixed-token-123", "--port", "6789"])
+        link = capsys.readouterr().out.splitlines()[0].split("URL: ", 1)[1]
+        assert link.endswith("/?token=fixed-token-123")
+        assert applications[-1].state.access_token == "fixed-token-123"
+    app = applications[-1]
+    client = TestClient(app, base_url="http://127.0.0.1")
+    assert client.get("/api/runs").status_code == 401
+    headers = {"Authorization": "Bearer fixed-token-123"}
+    assert client.get("/api/workspace", headers=headers).json()["writable"] is False
+    assert client.post("/api/workspace/views", headers=headers, json={"name": "x", "state": {}}).status_code == 403
+
+
+@pytest.mark.parametrize("token", ["", "with space", "line\nbreak", "snow☃"])
+def test_share_token_rejects_empty_whitespace_and_non_ascii(token):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["serve", "--share-token", token])
 
 
 def test_migrate_defaults():

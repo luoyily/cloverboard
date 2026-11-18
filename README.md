@@ -125,6 +125,13 @@ On a GPU machine, serve its log directory in token-protected, read-only mode:
 cloverboard serve --logdir ./runs --host 0.0.0.0 --share
 ```
 
+To reuse a fixed token across restarts, pass it with `--share-token` instead;
+this also implies read-only share mode:
+
+```sh
+cloverboard serve --logdir ./runs --host 0.0.0.0 --share-token TOKEN
+```
+
 On your own machine, use that machine's LAN address and the token printed by
 the server:
 
@@ -134,7 +141,8 @@ cloverboard serve --logdir ./runs --peers "gpu1=10.0.0.12:7230?token=TOKEN"
 
 Separate multiple peers with commas. Add another local directory with
 `--source "archive=./older-runs"`. Peer aggregation is one hop, and peer data
-is read-only. Restarting a shared server generates a new token.
+is read-only. Restarting a `--share` server generates a new token;
+`--share-token` keeps the supplied value.
 
 You can also open the shared board in a browser using the GPU machine's LAN
 address and `?token=TOKEN`. Viewers keep their own viewing session and My Views
