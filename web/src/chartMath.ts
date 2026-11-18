@@ -59,6 +59,25 @@ export function compareReadouts(a: ReadoutSample, b: ReadoutSample, smoothed: bo
   return bv! - av!;
 }
 
+export interface SortableReadout {
+  run: { run_id: string };
+  value: unknown;
+}
+
+// Column-driven hover order: the baseline stays first, missing values stay last,
+// and strings use numeric-aware locale order for names like "run 2" and "run 10".
+export function compareReadoutBy(a: SortableReadout, b: SortableReadout, descending: boolean, baselineId: string | null): number {
+  const baselineOrder = Number(b.run.run_id === baselineId) - Number(a.run.run_id === baselineId);
+  if (baselineOrder !== 0) return baselineOrder;
+  const missing = (value: unknown) => value === null || value === undefined || (typeof value === "number" && !Number.isFinite(value));
+  const aMissing = missing(a.value), bMissing = missing(b.value);
+  if (aMissing || bMissing) return Number(aMissing) - Number(bMissing);
+  const difference = typeof a.value === "number" && typeof b.value === "number"
+    ? a.value - b.value
+    : String(a.value).localeCompare(String(b.value), undefined, { numeric: true });
+  return descending ? -difference : difference;
+}
+
 export function nearestPoint(points: ScalarPoint[], step: number): ScalarPoint | undefined {
   if (!points.length || step < points[0].step) return undefined;
   let low = 0, high = points.length;

@@ -24,7 +24,7 @@ const colorMath = await import(pathToFileURL(join(directory, "colorMath.mjs")));
 const colors = await import(pathToFileURL(join(directory, "colors.mjs")));
 const readout = await import(pathToFileURL(join(directory, "readout.mjs")));
 const { imagesAtStep, sampleSteps } = await import(pathToFileURL(join(directory, "imageTimeline.mjs")));
-const { nearestPoint, buildPath, compareReadouts, valueDomain, fittedDomain, logTicks, visiblePoints, tailStepRange, stepAxis, lonePoint } = await import(pathToFileURL(join(directory, "chartMath.mjs")));
+const { nearestPoint, buildPath, compareReadoutBy, compareReadouts, valueDomain, fittedDomain, logTicks, visiblePoints, tailStepRange, stepAxis, lonePoint } = await import(pathToFileURL(join(directory, "chartMath.mjs")));
 const { pooledResults, getJson, fetchRunsWithEtag } = await import(pathToFileURL(join(directory, "api.mjs")));
 const { BoundedCache, RequestCache } = await import(pathToFileURL(join(directory, "dataCache.mjs")));
 const { defaultWorkspaceState, normalizeState, viewStateKey, encodeSharedState, readSharedLocation, normalizeRefreshInterval, isRefreshInterval, REFRESH_INTERVAL_KEY } = await import(pathToFileURL(join(directory, "workspace.mjs")));
@@ -575,6 +575,17 @@ test("hover order follows the rendered values, keeps baseline first and supports
   assert.deepEqual(ordered(true, "baseline", "value"), ["baseline", "ema-high", "raw-high", "missing"]);
   assert.deepEqual(ordered(true, "baseline", "list"), ["baseline", "raw-high", "missing", "ema-high"]);
   assert.deepEqual(ordered(false, null, "list"), rows.map((row) => row.run.run_id));
+});
+
+test("pinned hover columns sort values with baseline first and missing values last", () => {
+  const row = (id, value) => ({ run: run(id), value });
+  const rows = [row("b", 2), row("missing", null), row("baseline", 99), row("c", 1), row("nan", Number.NaN)];
+  const ordered = (desc, baseline = "baseline") => [...rows].sort((a, b) => compareReadoutBy(a, b, desc, baseline)).map((entry) => entry.run.run_id);
+  assert.deepEqual(ordered(true), ["baseline", "b", "c", "missing", "nan"]);
+  assert.deepEqual(ordered(false), ["baseline", "c", "b", "missing", "nan"]);
+  // Names sort naturally, so "run 2" stays before "run 10".
+  const names = [row("ten", "run 10"), row("two", "run 2"), row("one", "run 1")];
+  assert.deepEqual([...names].sort((a, b) => compareReadoutBy(a, b, false, null)).map((entry) => entry.run.run_id), ["one", "two", "ten"]);
 });
 
 test("palette sources are unique, maximin-ordered, and meet theme contrast", () => {

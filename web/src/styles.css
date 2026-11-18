@@ -1040,7 +1040,11 @@ body.column-resizing { user-select: none; }
 .tooltip-table { display: grid; column-gap: 8px; padding: 0 6px; font-variant-numeric: tabular-nums; }
 .tooltip-columns, .tooltip-row { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; white-space: nowrap; }
 .tooltip-columns { padding: 1px 0 4px; color: var(--text-muted); font-size: 10px; line-height: 14px; border-bottom: 1px solid var(--border); }
-.tooltip-columns > span:not(:first-child), .tooltip-row > span:not(:first-child) { min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; }
+.tooltip-columns > :not(:first-child), .tooltip-row > span:not(:first-child) { min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; }
+.tooltip-columns > span, .tooltip-columns > button { padding: 2px 0; }
+.tooltip-columns > button { border: 0; background: transparent; color: inherit; font: inherit; line-height: inherit; white-space: nowrap; cursor: pointer; }
+.tooltip-columns > button:first-child { text-align: left; }
+.tooltip-columns > button:hover, .tooltip-columns > button.active { color: var(--text); }
 .tooltip-row { padding: 3px 0; width: 100%; border: 0; border-radius: 0; background: transparent; text-align: left; color: var(--text); font-size: 11px; line-height: 16px; cursor: default; }
 .tooltip-row:hover { background: var(--hover); }
 .tooltip-pinned .tooltip-row { cursor: pointer; }

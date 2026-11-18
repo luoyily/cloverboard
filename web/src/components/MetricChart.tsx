@@ -7,7 +7,7 @@ import type { NamedTarget } from "../targets";
 import type { WorkspaceUpdate, ChartLegendLayout } from "../workspace";
 import type { MetricSeries } from "../scalarSeries";
 import { formatMetric, runLabel } from "../comparison";
-import { buildPath, compareReadouts, fittedDomain, logTicks, lonePoint, nearestPoint, stepAxis, visiblePoints } from "../chartMath";
+import { buildPath, compareReadoutBy, compareReadouts, fittedDomain, logTicks, lonePoint, nearestPoint, stepAxis, visiblePoints } from "../chartMath";
 import MetricMenu from "./MetricMenu";
 import { elapsedTime, formatDuration, formatTableTime, formatWallTime, timeOriginLabel, type ReadoutPlacement } from "../readout";
 import { useSettledDomain, useWarmupRange } from "../useChartRange";
@@ -29,6 +29,12 @@ function formatReadout(value: number | null | undefined, decimals: number): stri
 function formatDelta(value: number | null, decimals: number): string {
   const label = formatReadout(value, decimals);
   return value !== null && value > 0 && Number(label) !== 0 ? `+${label}` : label;
+}
+
+type TooltipColumn = "run" | "step" | "raw" | "ema" | "base" | "target" | "time";
+interface TooltipColumnSort { column: TooltipColumn; desc: boolean }
+function defaultsToDescending(column: TooltipColumn): boolean {
+  return column === "raw" || column === "ema" || column === "base" || column === "target";
 }
 
 interface MetricChartProps {
@@ -60,6 +66,7 @@ export default memo(function MetricChart({ metric, title, loading, dataTick, exp
   const [pinned, setPinned] = useState(false);
   const [zoom, setZoom] = useState<ChartZoom>();
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [columnSort, setColumnSort] = useState<TooltipColumnSort | null>(null);
   const [box, setBox] = useState<{ x: number; y: number; endX: number; endY: number } | null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
   const pinTimer = useRef<number | undefined>(undefined);
@@ -78,7 +85,8 @@ export default memo(function MetricChart({ metric, title, loading, dataTick, exp
     observer.observe(element); return () => observer.disconnect();
   }, []);
   useEffect(() => { setIncludeTarget(false); }, [target?.value, target?.direction, zoom]);
-  useEffect(() => { if (!pinned) setDetailId(null); }, [pinned]);
+  useEffect(() => { if (!pinned) { setDetailId(null); setColumnSort(null); } }, [pinned]);
+  useEffect(() => { setColumnSort(null); }, [tooltipSort, timeDisplay, deltaDisplay, smoothing]);
   useEffect(() => () => { window.clearTimeout(pinTimer.current); cancelAnimationFrame(hoverFrame.current); }, []);
   useEffect(() => { window.clearTimeout(pinTimer.current); clearHover(); setPinned(false); }, [zoom?.x_min, zoom?.x_max, metric]);
   useEffect(() => { setZoom(current => current ? { ...current, y_min: null, y_max: null } : current); }, [yScale, warmupStep]);
@@ -153,12 +161,53 @@ export default memo(function MetricChart({ metric, title, loading, dataTick, exp
     const lone = lonePoint(entry.points, smoothing > 0, logarithmic, minStep, maxStep);
     return lone ? [{ entry, ...lone }] : [];
   }), [drawing, smoothing, logarithmic, minStep, maxStep]);
-  const hover = hoverStep === null ? [] : entries.map((entry) => ({ ...entry, point: nearestPoint(entry.points, hoverStep) }))
-    .sort((a, b) => compareReadouts(a, b, smoothing > 0, baselineId, tooltipSort));
-  const baseline = hover.find((e) => e.run.run_id === baselineId);
   const columns = deltaColumns(deltaDisplay, Boolean(baselineId), Boolean(target));
-  const detail = pinned ? hover.find((entry) => entry.run.run_id === detailId) : undefined;
+  const hoverRows = hoverStep === null ? [] : entries.map((entry) => ({ ...entry, point: nearestPoint(entry.points, hoverStep) }));
+  const baseline = hoverRows.find((entry) => entry.run.run_id === baselineId);
   const basePoint = baseline?.point;
+  const defaultSort: TooltipColumn | null = tooltipSort === "value" ? (smoothing > 0 ? "ema" : "raw") : null;
+  const sortable = pinned && columnSort
+    && (columnSort.column !== "ema" || smoothing > 0)
+    && (columnSort.column !== "base" || columns.baseline)
+    && (columnSort.column !== "target" || columns.target)
+    && (columnSort.column !== "time" || timeDisplay !== "hidden") ? columnSort : null;
+  function readoutValue(entry: (typeof hoverRows)[number], column: TooltipColumn): unknown {
+    switch (column) {
+      case "run": return runLabel(entry.run);
+      case "step": return entry.point?.step ?? null;
+      case "raw": return entry.point?.value ?? null;
+      case "ema": return entry.point?.smoothed ?? null;
+      case "base": return entry.run.run_id === baselineId ? null : baselineDelta(entry.point, basePoint);
+      case "target": return targetDelta(entry.point, target);
+      case "time": return timeDisplay === "wall" ? entry.point?.wall_time ?? null : timeDisplay === "elapsed" ? elapsedTime(entry.point, entry.run) : null;
+    }
+  }
+  const hover = sortable
+    ? hoverRows.map((entry) => ({ entry, run: entry.run, value: readoutValue(entry, sortable.column) }))
+      .sort((a, b) => compareReadoutBy(a, b, sortable.desc, baselineId))
+      .map(({ entry }) => entry)
+    : [...hoverRows].sort((a, b) => compareReadouts(a, b, smoothing > 0, baselineId, tooltipSort));
+  const detail = pinned ? hover.find((entry) => entry.run.run_id === detailId) : undefined;
+  function toggleColumnSort(column: TooltipColumn) {
+    setColumnSort((current) => {
+      if (current) return { column, desc: current.column === column ? !current.desc : defaultsToDescending(column) };
+      return { column, desc: column === defaultSort ? false : defaultsToDescending(column) };
+    });
+  }
+  function sortArrow(column: TooltipColumn): string {
+    if (sortable) return sortable.column === column ? (sortable.desc ? " ↓" : " ↑") : "";
+    return column === defaultSort ? " ↓" : "";
+  }
+  function columnHeader(column: TooltipColumn, label: string, title?: string) {
+    const arrow = sortArrow(column);
+    if (!pinned) return <span key={column} title={title}>{label}{arrow}</span>;
+    const active = sortable?.column === column;
+    const state = active ? (sortable?.desc ? "descending" : "ascending") : null;
+    return <button key={column} type="button" className={`tooltip-sort${active ? " active" : ""}`}
+      title={`${title ? `${title}. ` : ""}${state ? `Currently ${state}. ` : ""}Click to sort; click again to reverse.`}
+      aria-label={`Sort by ${label}${state ? `, currently ${state}` : ""}`}
+      onClick={() => toggleColumnSort(column)}>{label}{arrow}</button>;
+  }
   const focused = entries.find((e) => e.run.run_id === focusedId);
   const first = focused ? summaries.get(seriesKey(focused.run.run_id, metric))?.first_hit : undefined;
 
@@ -253,7 +302,15 @@ export default memo(function MetricChart({ metric, title, loading, dataTick, exp
           {pinned && <button className="text-button" aria-label="Close readout" onClick={dismissReadout}>×</button>}
         </div>
         <div className="tooltip-table" onPointerLeave={() => onFocusRun(null)} style={{ gridTemplateColumns: `minmax(120px, 1fr) repeat(${2 + Number(smoothing > 0) + Number(columns.baseline) + Number(columns.target) + Number(timeDisplay !== "hidden")}, max-content)` }}>
-        <div className="tooltip-columns"><span>Run</span><span>Step</span><span>Raw{tooltipSort === "value" && smoothing === 0 ? " ↓" : ""}</span>{smoothing > 0 && <span>EMA{tooltipSort === "value" ? " ↓" : ""}</span>}{columns.baseline && <span title="Raw − baseline Raw using each run's nearest sample">Δ Base</span>}{columns.target && <span title="Raw − target; signed metric units">Δ Target</span>}{timeDisplay !== "hidden" && <span title={timeDisplay === "wall" ? "Sample time in your local timezone" : "Per-run time since Step 0, or first recorded sample"}>{timeDisplay === "wall" ? "Time" : "Elapsed"}</span>}</div>
+        <div className="tooltip-columns" title={pinned ? "Click a column to sort; click again to reverse" : undefined}>
+          {columnHeader("run", "Run")}
+          {columnHeader("step", "Step")}
+          {columnHeader("raw", "Raw")}
+          {smoothing > 0 && columnHeader("ema", "EMA")}
+          {columns.baseline && columnHeader("base", "Δ Base", "Raw − baseline Raw using each run's nearest sample")}
+          {columns.target && columnHeader("target", "Δ Target", "Raw − target; signed metric units")}
+          {timeDisplay !== "hidden" && columnHeader("time", timeDisplay === "wall" ? "Time" : "Elapsed", timeDisplay === "wall" ? "Sample time in your local timezone" : "Per-run time since Step 0, or first recorded sample")}
+        </div>
         {hover.map((entry) => {
           const id = entry.run.run_id, delta = id === baselineId ? null : baselineDelta(entry.point, basePoint), summary = summaries.get(seriesKey(id, metric));
           const met = target ? targetMet(entry.point, target) : null;
